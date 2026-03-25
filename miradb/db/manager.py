@@ -1,7 +1,5 @@
 import logging
 import re
-from typing import Type
-from collections import defaultdict
 
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError

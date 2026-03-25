@@ -1,12 +1,9 @@
 import logging
-from functools import lru_cache
 
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import select, Table, MetaData, func, or_, cast, Text, literal, lateral
+from sqlalchemy import select, Table, MetaData, func, or_, cast, Text, literal
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql.expression import text as sa_text
-from sympy.parsing.sympy_parser import parse_expr
 from sympy import latex, Derivative
 import json 
 from db.manager import get_db

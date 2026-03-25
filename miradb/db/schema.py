@@ -1,7 +1,7 @@
 import logging
 
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, String, CheckConstraint, ForeignKeyConstraint, ForeignKey, Boolean, DateTime, func, BigInteger
+from sqlalchemy import Column, Integer, String, CheckConstraint, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSON, ARRAY
 

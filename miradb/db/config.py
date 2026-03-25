@@ -13,7 +13,7 @@ DB_STR_FMT = "{prefix}://{username}{password}{host}{port}/{name}"
 ENV_PREFIX = 'MIRADB'
 
 
-logger = logging.getLogger('db_config')
+logger = logging.getLogger(__name__)
 
 
 CONFIG_EXISTS = True

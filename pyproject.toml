@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "miradb"
+version = "0.1.0"
+description = "An automatically extracted database of MIRA models"
+readme = "README.md"
+license = "BSD-2-Clause"
+requires-python = ">=3.10"
+dependencies = [
+    "flask",
+    "sqlalchemy>=2",
+    "mira @ git+https://github.com/gyorilab/mira.git",
+]
+
+[project.urls]
+Repository = "https://github.com/gyorilab/miradb"
+
+[tool.setuptools.packages.find]
+include = ["miradb*"]
