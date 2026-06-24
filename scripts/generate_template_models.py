@@ -7,7 +7,9 @@ from pathlib import Path
 import pandas as pd
 import pystow
 import tqdm
+import traceback
 
+from mira.openai_utility import OpenAIClient
 from mira.sources.sympy_ode.paper_extraction import \
     get_template_model_from_pmid, get_pmid_pmc_download_mapping
 from mira.modeling import Model
@@ -35,8 +37,17 @@ def result_to_intermediates(result):
     """
     grounding = result.grounding
     concepts = None
-    if grounding is not None and grounding.concepts:
-        concepts = {k: v.to_json() for k, v in grounding.concepts.items()}
+    try:
+        if grounding is not None and grounding.concepts:
+            concepts = {
+                k: v if isinstance(v, dict) else v.to_json()
+                if hasattr(v, "to_json") else ValueError(f"Unexpected concept type: {type(v)}")
+                for k, v in grounding.concepts.items()
+            }
+
+    except Exception as e:
+        logger.warning(f"Error processing grounding concepts: {e}")
+        logger.debug(traceback.format_exc())
 
     return {
         "ode_str": result.extraction.ode_str if result.extraction else None,
@@ -76,11 +87,14 @@ def main():
     # (positive) by the trained model.
     df = pd.read_csv(POSITIVE_PAPERS_PATH, sep='\t')
 
-    pmid_to_download_mapping = get_pmid_pmc_download_mapping()
+    # Initialize the OpenAI client with the desired model and temperature. 
+    # Temperature is set to 0.0 for deterministic outputs.
+    client = OpenAIClient(model="gpt-5.4-mini", temperature=0.0)
 
     # modify based on preferred settings
     extractor = "mineru"  # options: "mineru" or "marker" or "xml"
-    extraction_method = "image"  # options: "text" or "image"
+    extraction_method = "text"  # options: "text" or "image"
+
     # Canonical extraction-method folder name that populate_db.py reads (see
     # miradb/db/extraction_methods.json). Marker and XML are text-only, so they
     # use a fixed name rather than the "{extractor}_{method}" form.
@@ -92,6 +106,8 @@ def main():
     output_directory.mkdir(parents=True, exist_ok=True)
     progress_file = output_directory / "extraction_progress.csv"
     print(f"Saving progress to {progress_file}")
+
+    pmid_to_download_mapping = get_pmid_pmc_download_mapping()
 
     processed_pmids = set()
     if progress_file.exists():
@@ -112,8 +128,17 @@ def main():
             tm, result = get_template_model_from_pmid(
                 pmid=pmid, ode_extraction_method=extraction_method,
                 extractor=extractor,
-                pmid_to_download_mapping=pmid_to_download_mapping)
-            logger.info(f"PMID {pmid} ODE:\n{result.final_ode_str}\n")
+                pmid_to_download_mapping=pmid_to_download_mapping,
+                client=client)
+    
+            if tm is None:
+                logger.warning(f"PMID {pmid} - No template model extracted.")
+                with open(progress_file, 'a') as f:
+                    f.write(f"{pmid};failed;no_model_found\n")
+                continue
+
+            # logger.info(f"PMID {pmid} ODE:\n{result.final_ode_str}\n")
+            
             # Create OdeModel only for validation, then release
             om = OdeModel(Model(tm), initialized=True)
             save_with_intermediates(tm, result, pmid, folder_name)
@@ -126,11 +151,17 @@ def main():
         except Exception as e:
             logger.warning(f"Failed to extract model for PMID {pmid}: {e}")
             with open(progress_file, 'a') as f:
-                f.write(f"{pmid};failed;{str(e)}\n")
+                f.write(f"{pmid};failed;{type(e).__name__}:{str(e)}\n")
             continue
         finally:
             gc.collect()
+        break
 
+    llm_settings_file = output_directory / "llm_settings.txt"
+    client.save_client_usage(filepath=llm_settings_file)
+    logger.info(f"Saved LLM usage settings to {llm_settings_file}")
+
+    client.close()
 
 if __name__ == "__main__":
     main()
