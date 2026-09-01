@@ -1,12 +1,16 @@
 import logging
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from miradb.db.config import get_databases
 from miradb.db.schema import Base, EpiTable
 
 logger = logging.getLogger(__name__)
+
+# Recycle pooled connections before typical idle timeouts (RDS, NLB, proxies).
+POOL_RECYCLE_SECONDS = 300
 
 
 class MiraDatabaseError(Exception):
@@ -62,16 +66,31 @@ class MiraDatabaseClient:
     label :
         The label of the database e.g., "primary".
     engine : sqlalchemy.engine.Engine, optional
-        The engine of the database.
+        The engine of the database. If omitted, an engine is created.
     """
 
     def __init__(self, url: str, *, label: str | None = None, engine=None):
         self.url = url
         self.label = label
-        self.engine = engine or create_engine(url)
+        self.engine = engine or create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_recycle=POOL_RECYCLE_SECONDS,
+        )
         self.table_mapping = {
             tbl.__tablename__: tbl for tbl in EpiTable.__subclasses__()
         }
+
+    def _run_with_retry(self, fn):
+        try:
+            with self.session() as sess:
+                return fn(sess)
+        except OperationalError:
+            logger.warning(
+                "Database operation failed with OperationalError; retrying once"
+            )
+            with self.session() as sess:
+                return fn(sess)
 
     def session(self) -> MiraDatabaseSessionManager:
         """Returns a database session context manager
@@ -98,8 +117,9 @@ class MiraDatabaseClient:
         : list[dict]
             A list of mappings representing the rows returned by the query
         """
-        with self.session() as sess:
-            return sess.execute(statement, params).mappings().all()
+        return self._run_with_retry(
+            lambda sess: sess.execute(statement, params).mappings().all()
+        )
 
     def query_one(self, statement, params: dict | None = None):
         """Execute a SELECT statement and return the first row as a mapping
@@ -117,8 +137,9 @@ class MiraDatabaseClient:
             A mapping representing the first row returned by the query, or None
             if no rows were returned.
         """
-        with self.session() as sess:
-            return sess.execute(statement, params).mappings().first()
+        return self._run_with_retry(
+            lambda sess: sess.execute(statement, params).mappings().first()
+        )
 
     def mutate(self, fn):
         """Run a function that modifies the database and commit on success
@@ -131,8 +152,7 @@ class MiraDatabaseClient:
             function executes successfully, or rolled back if an exception is
             raised.
         """
-        with self.session() as sess:
-            return fn(sess)
+        return self._run_with_retry(fn)
 
     def query_sql(self, sql: str, params: dict | None = None):
         """Execute a SQL statement and return all rows as mappings
@@ -150,8 +170,9 @@ class MiraDatabaseClient:
             A list of mappings representing the rows returned by the query, or
             None if no rows were returned.
         """
-        with self.session() as sess:
-            return sess.execute(text(sql), params or {}).mappings().all()
+        return self._run_with_retry(
+            lambda sess: sess.execute(text(sql), params or {}).mappings().all()
+        )
 
     def create_tables(self, tables: list[EpiTable | str] = None):
         """Create the tables in the MIRA-DB database
