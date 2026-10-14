@@ -61,7 +61,8 @@ def search_pmids():
             "title": "...",
             "author_list": "...",
             "pub_year": ...,
-            "model_count": ...
+            "model_count": ...,
+            "scenario_count": ...
         },
         ...
     ]
@@ -86,7 +87,8 @@ def get_all_pmids():
             "title": "An SEIR model of influenza",
             "author_list": "Zhang et al.",
             "pub_year":   2021,
-            "model_count": 3
+            "model_count": 3,
+            "scenario_count": 2
         },
         ...
     ]
@@ -114,6 +116,43 @@ def get_models_for_pmid(pmid: str):
     ]
     """
     results = queries.list_models_for_pmid(get_db_client(), pmid)
+    return jsonify(results)
+
+
+@explorer_blueprint.route("/api/pmids/<pmid>/scenarios")
+def get_scenarios_for_pmid(pmid: str):
+    """Return the scenarios and parameters for a PMID, grouped by extractor.
+
+    Response format:
+    [
+        {
+            "extraction_method": "marker",
+            "method_label": "Marker Extraction",
+            "scenarios": [
+                {
+                    "id": 1,
+                    "name": "default",
+                    "description": "...",
+                    "parameters": [
+                        {
+                            "name": "beta",
+                            "display_name": "β",
+                            "description": "...",
+                            "value": 0.5,
+                            "value_expression": null,
+                            "units": "1/day",
+                            "distribution": null
+                        },
+                        ...
+                    ]
+                },
+                ...
+            ]
+        },
+        ...
+    ]
+    """
+    results = queries.list_scenarios_for_pmid(get_db_client(), pmid)
     return jsonify(results)
 
 
