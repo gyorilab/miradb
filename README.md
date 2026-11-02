@@ -107,6 +107,30 @@ LaTeX ODE equations using MIRA's `OdeModel`. Run it locally with:
 python -m miradb.sources.app
 ```
 
+## REST API
+
+The web service also exposes a REST API under `/api`, with an OpenAPI
+spec at `/api/docs/openapi.json` and interactive documentation at
+`/api/docs/swagger`. Models are addressed by PMID and extraction method.
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/models` | Search models by `q`, `pmid`, `method` and `concept` (a grounding CURIE), paginated |
+| `GET /api/models/<pmid>` | The highest priority model of a publication |
+| `GET /api/models/<pmid>/<method>` | The model extracted by a given method |
+| `GET`/`POST /api/download` | All models matching the search filters, as JSON Lines or a zip of SBML or SymPy files |
+| `GET /api/publications` | List or search publications |
+| `GET /api/publications/<pmid>` | Publication metadata and its models |
+| `GET /api/publications/<pmid>/scenarios` | Scenarios and parameters of a publication |
+
+Model endpoints take `format=json|sbml|sympy`, and `best=true` keeps only
+the highest priority model per publication. For example:
+
+```bash
+curl "https://epimodels.io/api/models?concept=ido:0000514&best=true"
+curl -o models.jsonl "https://epimodels.io/api/download"
+```
+
 ## Docker
 
 A two-container setup (database + app) is defined under [`docker/`](docker/).

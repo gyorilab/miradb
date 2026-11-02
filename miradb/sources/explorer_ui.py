@@ -1,25 +1,18 @@
 import logging
-import re
-import math
 
 from flask import Blueprint, jsonify, render_template, request, send_file, abort
 import json
 import io
+from miradb import export
 from miradb.db.client import get_client
 from miradb.db import queries
 from miradb.db.extraction_methods import EXTRACTION_METHODS_PRIORITY
-from mira.modeling import Model
-from mira.modeling.ode import OdeModel
-from mira.metamodel.template_model import Time
-from mira.modeling.sbml import template_model_to_sbml_string
 
 
 logger = logging.getLogger(__name__)
 
 explorer_blueprint = Blueprint("explorer", __name__, url_prefix="/explorer")
 explorer_blueprint.template_folder = "templates"
-
-symbol_re = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
 
 _client = None
 
@@ -181,18 +174,7 @@ def download_sbml(ode_id: int):
         abort(404, description=f"No TemplateModel found for ode id {ode_id}")
 
     try:
-        # SBML does not allow empty/nan parameter values
-        for param in tm.parameters.values():
-            if param.value is None or (
-                isinstance(param.value, float) and math.isnan(param.value)
-            ):
-                param.value = 0.0
-            elif not isinstance(param.value, (int, float)):
-                try:
-                    param.value = float(param.value)
-                except (TypeError, ValueError):
-                    param.value = 0.0
-        sbml_str = template_model_to_sbml_string(tm)
+        sbml_str = export.to_sbml(tm)
     except Exception as e:
         logger.error(f"SBML export failed for ode id {ode_id}")
         logger.exception(e)
@@ -215,66 +197,10 @@ def download_sympy(ode_id: int):
         abort(404, description=f"No TemplateModel found for ode id {ode_id}")
 
     try:
-        tm.time = Time(name="t", units=None)
-        om = OdeModel(model=Model(template_model=tm), initialized=False)
-        kinetics = om.get_interpretable_kinetics()
-
-        # Collect (lhs_str, rhs_str) pairs
-        ode_pairs = []
-        if hasattr(kinetics, "tolist"):
-            for row in kinetics.tolist():
-                if len(row) == 3:
-                    lhs, _, rhs = row
-                    ode_pairs.append((str(lhs), str(rhs)))
-                elif len(row) == 2:
-                    lhs, rhs = row
-                    ode_pairs.append((str(lhs), str(rhs)))
-        elif isinstance(kinetics, (list, tuple)):
-            for expr in kinetics:
-                ode_pairs.append((str(expr), ""))
-        else:
-            ode_pairs.append((str(kinetics), ""))
-
+        py_str = export.to_sympy(tm)
     except Exception:
         logger.exception(f"SymPy export failed for ode_id={ode_id}")
         abort(500, description="SymPy ODE export failed - see server logs.")
-
-    lines = [
-        "from sympy import *",
-        "",
-    ]
-
-    # Declare all symbols that appear across lhs + rhs
-    all_symbols: set[str] = set()
-    skip = {"Derivative", "Function", "Symbol", "symbols", "t"}
-    for lhs, rhs in ode_pairs:
-        for token in symbol_re.findall(lhs + " " + rhs):
-            if token not in skip:
-                all_symbols.add(token)
-
-    if all_symbols:
-        lines.append("# Declare symbols")
-        lines.append(
-            f"{', '.join(sorted(all_symbols))} = symbols('{' '.join(sorted(all_symbols))}')"
-        )
-        lines.append("")
-
-    for lhs, rhs in ode_pairs:
-        if rhs:
-            lines.append(f"# {lhs} = {rhs}")
-        else:
-            lines.append(f"# {lhs}")
-
-    lines += [
-        "",
-        "odes = {",
-    ]
-    for lhs, rhs in ode_pairs:
-        if rhs:
-            lines.append(f"    {lhs!r}: {rhs},")
-    lines.append("}")
-
-    py_str = "\n".join(lines) + "\n"
 
     return send_file(
         io.BytesIO(py_str.encode()),
