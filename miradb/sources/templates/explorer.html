@@ -397,6 +397,21 @@
                           class="spinner-border spinner-border-sm text-secondary"
                           style="display:none;width:.85rem;height:.85rem;"></span>
                 </div>
+                <div id="bulk-dl" class="dropdown mt-2">
+                    <button class="dl-btn dl-btn-json dropdown-toggle"
+                            data-bs-toggle="dropdown">
+                        <i class="bi bi-download"></i>
+                        <span id="bulk-dl-label">Download all models</span>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><a class="dropdown-item small" data-format="json">JSON Lines</a></li>
+                        <li><a class="dropdown-item small" data-format="sbml">SBML (zip)</a></li>
+                        <li><a class="dropdown-item small" data-format="sympy">SymPy (zip)</a></li>
+                        <li id="bulk-dl-note" class="px-3 pt-1 text-muted" style="font-size:.7rem">
+                            Search to download as SBML or SymPy
+                        </li>
+                    </ul>
+                </div>
             </div>
 
             <!-- List -->
@@ -547,11 +562,29 @@ function renderSidebar(list) {
 ════════════════════════════════════════════════════════════ */
 const searchSpinner = document.getElementById('search-spinner');
 
+// Point the bulk download menu at the models of the current search, one
+// per publication. Without a search only JSON Lines is offered, since
+// converting the whole corpus to SBML or SymPy is slow.
+function updateBulkDownload(q, count) {
+    document.getElementById('bulk-dl').hidden = Boolean(q) && !count;
+    document.getElementById('bulk-dl-label').textContent = q
+        ? `Download ${count} model${count !== 1 ? 's' : ''}`
+        : 'Download all models';
+    document.getElementById('bulk-dl-note').hidden = Boolean(q);
+    document.querySelectorAll('#bulk-dl a').forEach(a => {
+        const params = new URLSearchParams({ best: 'true', format: a.dataset.format });
+        if (q) params.set('q', q);
+        a.href = `/api/download?${params}`;
+        a.classList.toggle('disabled', !q && a.dataset.format !== 'json');
+    });
+}
+
 async function runSearch(q) {
     if (currentSearchController) currentSearchController.abort();
 
     if (!q) {
         renderSidebar([]);
+        updateBulkDownload('', 0);
         return;
     }
 
@@ -564,6 +597,7 @@ async function runSearch(q) {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const results = await resp.json();
         renderSidebar(results);
+        updateBulkDownload(q, results.length);
     } catch (err) {
         if (err.name === 'AbortError') return;
         document.getElementById('sidebar-list').innerHTML =
@@ -574,6 +608,8 @@ async function runSearch(q) {
         currentSearchController = null;
     }
 }
+
+updateBulkDownload('', 0);
 
 document.getElementById('sidebar-search').addEventListener('input', function () {
     const q = this.value.trim();
