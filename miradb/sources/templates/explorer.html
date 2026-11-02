@@ -36,7 +36,7 @@
             width: auto;
             vertical-align: middle;
         }
-        #top-banner .github-link {
+        #top-banner .banner-link {
             display: flex;
             align-items: center;
             gap: 0.4rem;
@@ -45,8 +45,8 @@
             text-decoration: none;
             transition: color 0.12s;
         }
-        #top-banner .github-link:hover { color: #fff; }
-        #top-banner .github-link i { font-size: 1.1rem; }
+        #top-banner .banner-link:hover { color: #fff; }
+        #top-banner .banner-link i { font-size: 1.1rem; }
 
         /* ── Bottom footer ── */
         #bottom-footer {
@@ -369,7 +369,11 @@
             <img src="/static/mira_logo_inverted.png" alt="MIRA" class="banner-logo mira-logo">
         </div>
         <div class="banner-right">
-            <a class="github-link" href="https://github.com/gyorilab/miradb" target="_blank" rel="noopener">
+            <a class="banner-link" href="/api/docs/swagger">
+                <i class="bi bi-braces"></i>
+                REST API
+            </a>
+            <a class="banner-link" href="https://github.com/gyorilab/miradb" target="_blank" rel="noopener">
                 <i class="bi bi-github"></i>
                 View on GitHub
             </a>
