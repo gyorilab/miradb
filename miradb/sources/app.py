@@ -1,11 +1,18 @@
 import click
-from flask import Flask, redirect
+from flask import redirect
+from flask_openapi3 import Info, OpenAPI
+from .api import api_blueprint
 from .explorer_ui import explorer_blueprint
 
-app = Flask(__name__)
+app = OpenAPI(
+    __name__,
+    info=Info(title="MIRA-DB API", version="0.1.0"),
+    doc_prefix="/api/docs",
+)
 
 
 app.register_blueprint(explorer_blueprint)
+app.register_api(api_blueprint)
 
 
 @app.after_request

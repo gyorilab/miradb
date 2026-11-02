@@ -11,6 +11,7 @@ license = "BSD-2-Clause"
 requires-python = ">=3.10"
 dependencies = [
     "flask",
+    "flask-openapi3[swagger]",
     "sqlalchemy>=2",
     "click",
     "gunicorn",

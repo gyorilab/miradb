@@ -2,7 +2,8 @@ import json
 import logging
 import math
 
-from sqlalchemy import Text, cast, func, literal, or_, select
+from sqlalchemy import Text, case, cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.expression import text as sa_text
 from sympy import Derivative, latex
@@ -212,6 +213,19 @@ def _pmids_matching_grounded_concepts_subquery():
     )
 
 
+def _publication_match(pattern: str):
+    # The pattern is also bound as :pattern in the grounded concepts subquery
+    return or_(
+        TextRef.pmid.ilike(pattern),
+        TextRef.title.ilike(pattern),
+        cast(TextRef.authors, Text).ilike(pattern),
+        cast(TextRef.year, Text).ilike(pattern),
+        TextRef.pmid.in_(
+            select(_pmids_matching_grounded_concepts_subquery().c.pmid)
+        ),
+    )
+
+
 def list_publication_summaries(client: MiraDatabaseClient) -> list[dict]:
     """Return text_references that have at least one converted TemplateModel.
 
@@ -284,23 +298,139 @@ def search_publication_summaries(
         raise ValueError("Search query cannot be empty.")
     pattern = f"%{q.lower()}%"
     ode_count_sq = _ode_count_subquery(outer_join_odes=False)
-    gc_pmid_sq = _pmids_matching_grounded_concepts_subquery()
     stmt = (
         _publication_summary_select(ode_count_sq)
-        .where(
-            or_(
-                TextRef.pmid.ilike(pattern),
-                TextRef.title.ilike(pattern),
-                cast(TextRef.authors, Text).ilike(pattern),
-                cast(TextRef.year, Text).ilike(pattern),
-                TextRef.pmid.in_(gc_pmid_sq),
-            )
-        )
+        .where(_publication_match(pattern))
         .where(func.coalesce(ode_count_sq.c.ode_count, 0) > 0)
         .order_by(func.coalesce(ode_count_sq.c.ode_count, 0).desc())
     )
     rows = client.query(stmt, {"pattern": pattern})
     return [_format_publication_summary(row) for row in rows]
+
+
+def _concept_match(curie: str):
+    # Match a grounding identifier or a context value anywhere in the model
+    prefix, _, identifier = curie.partition(":")
+    tm = cast(MiraModel.mira_template_model, JSONB)
+    variables = literal(
+        {"prefix": prefix.lower(), "id": identifier, "curie": curie}, JSONB
+    )
+    paths = [
+        "$.**.identifiers.keyvalue() ? (@.key == $prefix && @.value == $id)",
+        "$.**.context.* ? (@ == $curie)",
+    ]
+    return or_(
+        *(
+            func.jsonb_path_exists(tm, cast(path, JSONPATH), variables)
+            for path in paths
+        )
+    )
+
+
+def search_models(
+    client: MiraDatabaseClient,
+    *,
+    q: str | None = None,
+    pmids: list[str] | None = None,
+    method: str | None = None,
+    concept: str | None = None,
+    best: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+    full: bool = False,
+) -> tuple[int, list[dict]]:
+    """Return models matching all given filters, ordered by PMID and method.
+
+    Parameters
+    ----------
+    client :
+        An instance of MiraDatabaseClient.
+    q :
+        Search string matched against publication metadata and grounded
+        concepts, as in ``search_publication_summaries``.
+    pmids :
+        Only include models from these PubMed IDs.
+    method :
+        Only include models from this extraction method.
+    concept :
+        Only include models with a concept grounded to this CURIE, or with
+        this CURIE as a context value.
+    best :
+        Keep only the highest priority matching model for each publication.
+    limit :
+        Maximum number of models to return, all if None.
+    offset :
+        Number of models to skip.
+    full :
+        Include the TemplateModel JSON and grounded concepts of each model.
+
+    Returns
+    -------
+    :
+        The total number of matching models, and a list of dictionaries with
+        keys ``pmid``, ``method``, ``title`` and ``year``, plus
+        ``template_model`` and ``grounded_concepts`` if ``full`` is True.
+    """
+    priority = case(
+        {m: i for i, m in enumerate(EXTRACTION_METHODS_PRIORITY)},
+        value=ExtractionMethod.extraction_method,
+        else_=len(EXTRACTION_METHODS_PRIORITY),
+    )
+    columns = [
+        TextRef.pmid,
+        ExtractionMethod.extraction_method.label("method"),
+        TextRef.title,
+        TextRef.year,
+        priority.label("priority"),
+        func.row_number()
+        .over(partition_by=TextRef.pmid, order_by=priority)
+        .label("rank"),
+    ]
+    if full:
+        columns += [
+            MiraModel.mira_template_model.label("template_model"),
+            MiraModel.grounded_concepts,
+        ]
+    stmt = (
+        select(*columns)
+        .select_from(MiraModel)
+        .join(ODEs, MiraModel.ode_ref == ODEs.id)
+        .join(TextContent, ODEs.txt_content_ref == TextContent.id)
+        .join(TextRef, TextContent.text_ref == TextRef.id)
+        .join(
+            ExtractionMethod, ODEs.extraction_method_id == ExtractionMethod.id
+        )
+        .where(MiraModel.mira_template_model.isnot(None))
+    )
+    params = {}
+    if q:
+        params["pattern"] = f"%{q.lower()}%"
+        stmt = stmt.where(_publication_match(params["pattern"]))
+    if pmids:
+        stmt = stmt.where(TextRef.pmid.in_([str(p) for p in pmids]))
+    if method:
+        stmt = stmt.where(ExtractionMethod.extraction_method == method)
+    if concept:
+        stmt = stmt.where(_concept_match(concept))
+    sq = stmt.subquery()
+    where = [sq.c.rank == 1] if best else []
+
+    total = client.query_one(
+        select(func.count().label("n")).select_from(sq).where(*where),
+        params,
+    )["n"]
+    page = (
+        select(sq)
+        .where(*where)
+        .order_by(sq.c.pmid, sq.c.priority)
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = [
+        {k: v for k, v in row.items() if k not in {"priority", "rank"}}
+        for row in client.query(page, params)
+    ]
+    return total, rows
 
 
 def _priority_index(method_key: str) -> int:
