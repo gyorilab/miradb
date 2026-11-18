@@ -59,14 +59,16 @@ def _get_db_with_type(db_url):
 def get_databases(force_update=False, include_config=True):
     global DATABASES
     if DATABASES is None or force_update:
-        DATABASES = {}
+        # Fill a local dict and publish it at the end, so a concurrent
+        # caller never sees a partly built (e.g. empty) DATABASES
+        databases = {}
         if CONFIG_EXISTS and include_config:
             parser = ConfigParser()
             parser.read(DB_CONFIG_PATH)
             for db_name in parser.sections():
                 def_dict = {k: parser.get(db_name, k)
                             for k in parser.options(db_name)}
-                DATABASES[db_name] = (_format_db_url(def_dict),
+                databases[db_name] = (_format_db_url(def_dict),
                                       def_dict.get('type', 'query'))
 
         db_host = environ.get(f'{ENV_PREFIX}_DB_HOST')
@@ -80,14 +82,15 @@ def get_databases(force_update=False, include_config=True):
                 'port': environ.get(f'{ENV_PREFIX}_DB_PORT', '5432'),
                 'name': environ.get(f'{ENV_PREFIX}_DB_NAME', 'mira_db'),
             }
-            DATABASES['primary'] = (
+            databases['primary'] = (
                 _format_db_url(component_dict),
                 environ.get(f'{ENV_PREFIX}_DB_TYPE', 'query')
             )
 
-        DATABASES.update({k[len(ENV_PREFIX):].lstrip('_').lower():
+        databases.update({k[len(ENV_PREFIX):].lstrip('_').lower():
                           _get_db_with_type(v)
                           for k, v in environ.items()
                           if k.startswith(ENV_PREFIX)
                           and not k.startswith(f'{ENV_PREFIX}_DB_')})
+        DATABASES = databases
     return DATABASES

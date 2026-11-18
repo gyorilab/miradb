@@ -14,6 +14,10 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.15/dist/katex.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.15/dist/contrib/auto-render.min.js"></script>
 
+    <!-- D3 + TopoJSON for the overview map and charts -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+
     <style>
         /* ── Top banner ── */
         #top-banner {
@@ -80,16 +84,6 @@
         #app-shell { display: flex; flex-direction: column; height: 100vh; }
         #content-row { display: flex; flex: 1; min-height: 0; }
 
-        #sidebar {
-            width: 240px;
-            flex-shrink: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100%;
-            background: #fff;
-            border-right: 1px solid #e5e7eb;
-        }
-
         #main-area {
             flex: 1;
             overflow-y: auto;
@@ -97,22 +91,6 @@
             padding: 1.25rem;
             background: #f3f4f6;
         }
-
-        /* ── Sidebar list items ── */
-        .sidebar-item {
-            display: block;
-            width: 100%;
-            text-align: left;
-            padding: 0.6rem 0.75rem;
-            border: none;
-            border-bottom: 1px solid #f1f5f9;
-            background: transparent;
-            cursor: pointer;
-            transition: background 0.12s;
-            border-left: 3px solid transparent;
-        }
-        .sidebar-item:hover  { background: #eff6ff; }
-        .sidebar-item.active { background: #eff6ff; border-left-color: #3b82f6; }
 
         /* ── Summary cards (grid) ── */
         .ep-summary-card {
@@ -228,14 +206,6 @@
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 1rem;
-        }
-
-        /* ── Search spinner ── */
-        #search-spinner {
-            position: absolute;
-            right: 0.5rem;
-            top: 50%;
-            transform: translateY(-50%);
         }
 
         /* ── Download buttons ── */
@@ -360,6 +330,110 @@
             color: #9ca3af;
             font-size: .78rem;
         }
+
+        /* ══ Overview: map, linked panel, charts, toolbar ══ */
+        #overview {
+            --ov-ink: #111827; --ov-ink-2: #4b5563; --ov-ink-3: #9ca3af;
+            --ov-border: #e5e7eb; --ov-grid: #eef0f3; --ov-seq0: #eef2f7;
+            --ov-s1: #2a78d6; --ov-s2: #eb6834; --ov-s3: #1baf7a; --ov-other: #b8bcc4;
+            --ov-accent: #eb6834; --ov-accent-soft: #fff4ed;
+        }
+        .ov-card { background: #fff; border: 1px solid var(--ov-border); border-radius: .75rem; padding: 1rem; }
+        .ov-card h6 { font-size: .8rem; font-weight: 700; color: #1e3a5f; margin: 0 0 .15rem; }
+        .ov-card .ov-sub { font-size: .72rem; color: var(--ov-ink-3); margin-bottom: .5rem; }
+        .ov-mini { font-size: .68rem; color: var(--ov-ink-2); }
+        .ov-label { font-size: .65rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; }
+
+        #ov-explore { padding: 0; overflow: hidden; }
+        #ov-explore .ov-hdr { padding: .75rem 1rem; border-bottom: 1px solid var(--ov-border); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+        #ov-explore .ov-body { display: flex; flex-wrap: wrap; }
+        #ov-explore .ov-map-col { flex: 1 1 520px; padding: .75rem 1rem; min-width: 0; }
+        #ov-panel { flex: 0 0 320px; max-width: 100%; border-left: 1px solid var(--ov-border); background: #fafbfc; padding: 1rem; position: relative; transition: background .15s; }
+        #ov-panel::before { content: ""; position: absolute; left: -1px; top: 0; bottom: 0; width: 4px; background: var(--ov-s1); transition: background .15s; }
+        #ov-panel.is-country::before { background: var(--ov-accent); }
+        #ov-panel.is-preview { background: var(--ov-accent-soft); }
+        #ov-panel .ov-scope { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+        #ov-panel .ov-scope .dot { width: 12px; height: 12px; border-radius: 3px; background: var(--ov-s1); flex-shrink: 0; }
+        #ov-panel.is-country .ov-scope .dot { background: var(--ov-accent); }
+        #ov-panel .ov-scope .name { font-size: 1rem; font-weight: 700; color: var(--ov-ink); line-height: 1.1; }
+        #ov-panel .ov-scope .state { font-size: .66rem; color: var(--ov-ink-3); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+        .ov-stats { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+        .ov-stat { background: #fff; border: 1px solid var(--ov-border); border-radius: .5rem; padding: .5rem .6rem; }
+        .ov-stat .num { font-size: 1.35rem; font-weight: 700; line-height: 1.1; color: var(--ov-ink); font-variant-numeric: tabular-nums; }
+        .ov-stat .lbl { font-size: .68rem; color: var(--ov-ink-2); }
+        .ov-det { font-size: .64rem; color: var(--ov-ink-3); }
+        .ov-sbar { height: 4px; background: var(--ov-grid); border-radius: 2px; margin-top: .35rem; overflow: hidden; }
+        .ov-sbar > div { height: 100%; background: var(--ov-s1); border-radius: 2px; }
+        .ov-sec { margin-top: .85rem; }
+        .ov-sec .t { font-size: .62rem; letter-spacing: .05em; text-transform: uppercase; color: #6b7280; font-weight: 600; margin-bottom: .3rem; }
+        .ov-hist { display: flex; align-items: flex-end; gap: 3px; height: 46px; }
+        .ov-hist .hcol { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+        .ov-hist .hbar { width: 100%; background: #9ec5f4; border-radius: 3px 3px 0 0; }
+        .ov-hist .hbar.med { background: var(--ov-s1); }
+        .ov-hist-x { display: flex; gap: 3px; font-size: .6rem; color: var(--ov-ink-3); margin-top: 2px; }
+        .ov-hist-x span { flex: 1; text-align: center; }
+        .ov-dis-row { display: grid; grid-template-columns: 18px 1fr 40px; gap: .4rem; align-items: center; font-size: .75rem; padding: 2px 0; cursor: pointer; }
+        .ov-dis-row .rk { color: var(--ov-ink-3); font-size: .68rem; text-align: right; }
+        .ov-dis-row .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ov-dis-row .bar { height: 6px; background: var(--ov-grid); border-radius: 3px; margin-top: 2px; overflow: hidden; }
+        .ov-dis-row .bar > div { height: 100%; background: var(--ov-s1); border-radius: 3px; }
+        .ov-dis-row .v { text-align: right; color: var(--ov-ink-2); font-size: .7rem; font-variant-numeric: tabular-nums; }
+        .ov-cov { display: flex; gap: .5rem; }
+        .ov-cov > div { flex: 1; }
+        .ov-cov .lbl { font-size: .64rem; color: var(--ov-ink-2); display: flex; justify-content: space-between; }
+
+        .ov-country { stroke: #fff; stroke-width: .5; cursor: pointer; transition: fill .1s; }
+        .ov-country:hover { stroke: var(--ov-accent); stroke-width: 1.5; }
+        .ov-country.sel { stroke: var(--ov-accent); stroke-width: 2.2; }
+        .ov-legend { font-size: .72rem; color: var(--ov-ink-2); display: flex; flex-wrap: wrap; gap: .75rem; }
+        .ov-swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+
+        #ov-filters { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+        .ov-fchip { display: inline-flex; align-items: center; gap: .35rem; font-size: .75rem; background: #dbeafe; color: #1d4ed8; border-radius: 999px; padding: .2rem .6rem; cursor: pointer; border: none; }
+        .ov-fchip.country { background: var(--ov-accent-soft); color: #b4441a; border: 1px solid #fbc9ad; }
+        .ov-fchip i { font-size: .7rem; }
+
+        .ov-hbar-row { display: grid; grid-template-columns: 120px 1fr 40px; align-items: center; gap: .5rem; padding: 2px 0; cursor: pointer; border-radius: 4px; }
+        .ov-hbar-row:hover { background: #f5f8fc; }
+        .ov-hbar-row .name { font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ov-hbar-row .fill { height: 12px; background: var(--ov-s1); border-radius: 0 4px 4px 0; min-width: 2px; }
+        .ov-hbar-row.active .name { font-weight: 700; }
+        .ov-hbar-row.active .fill { background: #1c5cab; }
+        #ov-bars-country .ov-hbar-row.active .fill { background: var(--ov-accent); }
+        .ov-hbar-row .val { font-size: .72rem; color: var(--ov-ink-2); text-align: right; font-variant-numeric: tabular-nums; }
+
+        #ov-tt { position: fixed; pointer-events: none; background: #111827; color: #fff; font-size: .72rem; padding: .35rem .55rem; border-radius: .4rem; opacity: 0; transition: opacity .08s; z-index: 1080; max-width: 260px; }
+
+        #ov-toolbar { background: #fff; border: 1px solid var(--ov-border); border-radius: .75rem; padding: .6rem .75rem; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+        #ov-toolbar .form-control, #ov-toolbar .form-select { font-size: .78rem; height: 32px; padding-top: .2rem; padding-bottom: .2rem; }
+        #ov-toolbar .ov-search { position: relative; flex: 1 1 220px; min-width: 180px; }
+        #ov-toolbar .ov-search i { position: absolute; left: .6rem; top: 50%; transform: translateY(-50%); color: var(--ov-ink-3); font-size: .8rem; }
+        #ov-toolbar .ov-search input { padding-left: 1.8rem; padding-right: 1.8rem; }
+        #ov-toolbar .ov-search #ov-q-spin { position: absolute; right: .6rem; top: 50%; margin-top: -.4rem; width: .8rem; height: .8rem; border-width: .15em; }
+        #ov-toolbar .ov-tb-btn.busy { opacity: .6; pointer-events: none; }
+        .ov-tb-btn { font-size: .78rem; height: 32px; display: inline-flex; align-items: center; gap: .35rem; border: 1px solid #d1d5db; background: #fff; color: #374151; border-radius: .4rem; padding: 0 .65rem; }
+        .ov-tb-btn.on { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+        #ov-toolbar .sep { width: 1px; height: 22px; background: var(--ov-border); }
+        .ov-facet-menu { width: 300px; padding: .5rem; font-size: .78rem; }
+        .ov-facet-menu input { font-size: .75rem; margin-bottom: .4rem; }
+        .ov-facet-menu .list { max-height: 260px; overflow: auto; }
+        .ov-facet-item { display: flex; justify-content: space-between; gap: .5rem; padding: .25rem .4rem; border-radius: .3rem; cursor: pointer; }
+        .ov-facet-item:hover { background: #eff6ff; }
+        .ov-facet-item.on { background: #dbeafe; color: #1d4ed8; font-weight: 600; }
+        .ov-facet-item .c { color: var(--ov-ink-3); font-variant-numeric: tabular-nums; }
+
+        /* Annotation strip on summary cards */
+        .ann-strip { padding: .4rem .75rem .1rem; border-bottom: 1px solid #f1f5f9; }
+        .ann-chip { display: inline-flex; align-items: center; gap: .3rem; font-size: .68rem; padding: .1rem .5rem; border-radius: 999px; border: 1px solid #e5e7eb; background: #fff; color: #111827; margin: 0 .25rem .3rem 0; }
+        .ann-chip i { font-size: .7rem; }
+        .ann-chip.dis { background: #fef2f2; border-color: #fecaca; }
+        .ann-chip.pat { background: #fff7ed; border-color: #fed7aa; }
+        .ann-chip.loc { background: #eff6ff; border-color: #bfdbfe; }
+        .ann-chip.host { background: #f0fdf4; border-color: #bbf7d0; }
+        #detail-tags { background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem; padding: .6rem .9rem .35rem; }
+        #detail-tags .dt-row { display: flex; align-items: baseline; gap: .75rem; }
+        #detail-tags .dt-row + .dt-row { border-top: 1px solid #f1f5f9; padding-top: .3rem; }
+        #detail-tags .dt-name { flex: 0 0 5.5rem; font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
     </style>
 </head>
 <body>
@@ -385,50 +459,97 @@
 
     <div id="content-row">
 
-        <!-- ══════════════ SIDEBAR ══════════════ -->
-        <div id="sidebar">
-            <!-- Header -->
-            <div class="px-3 pt-3 pb-2 border-bottom">
-                <h6 class="fw-bold text-dark mb-2">Model search</h6>
-                <div class="position-relative">
-                    <input id="sidebar-search" type="text"
-                           class="form-control form-control-sm"
-                           placeholder="Search PMID, title, author…"
-                           autocomplete="off">
-                    <span id="search-spinner"
-                          class="spinner-border spinner-border-sm text-secondary"
-                          style="display:none;width:.85rem;height:.85rem;"></span>
-                </div>
-                <div id="bulk-dl" class="dropdown mt-2">
-                    <button class="dl-btn dl-btn-json dropdown-toggle"
-                            data-bs-toggle="dropdown">
-                        <i class="bi bi-download"></i>
-                        <span id="bulk-dl-label">Download all models</span>
-                    </button>
-                    <ul class="dropdown-menu">
-                        <li><a class="dropdown-item small" data-format="json">JSON Lines</a></li>
-                        <li><a class="dropdown-item small" data-format="sbml">SBML (zip)</a></li>
-                        <li><a class="dropdown-item small" data-format="sympy">SymPy (zip)</a></li>
-                        <li id="bulk-dl-note" class="px-3 pt-1 text-muted" style="font-size:.7rem">
-                            Search to download as SBML or SymPy
-                        </li>
-                    </ul>
-                </div>
-            </div>
-
-            <!-- List -->
-            <div id="sidebar-list" class="overflow-auto flex-grow-1">
-                <p class="text-muted small text-center mt-4 px-2">
-                    Type to search by title, author, PMID, or grounding concept.
-                </p>
-            </div>
-        </div>
-
         <!-- ══════════════ MAIN AREA ══════════════ -->
         <div id="main-area">
 
             <!-- Grid view -->
             <div id="grid-view">
+                <!-- Overview: map + linked stats panel, term charts, filters -->
+                <div id="overview" style="display:none;">
+                    <div class="ov-card mb-3" id="ov-explore">
+                        <div class="ov-hdr">
+                            <h6 class="mb-0">Explore by location</h6>
+                            <div id="ov-filters"></div>
+                        </div>
+                        <div class="ov-body">
+                            <div class="ov-map-col">
+                                <svg id="ov-map" width="100%" viewBox="0 0 960 470"></svg>
+                                <div class="ov-legend mt-1">
+                                    <span class="me-1">Papers per country:</span>
+                                    <span id="ov-map-legend" class="ov-legend"></span>
+                                    <span><span class="ov-swatch" style="background:#fff;border:2px solid var(--ov-accent)"></span>selected</span>
+                                </div>
+                            </div>
+                            <div id="ov-panel">
+                                <div class="ov-scope">
+                                    <span class="dot"></span>
+                                    <div><div class="state" id="ov-p-state"></div><div class="name" id="ov-p-name"></div></div>
+                                </div>
+                                <div class="ov-stats" id="ov-p-stats"></div>
+                                <div class="ov-sec"><div class="t">Model size &middot; compartments per model</div><div id="ov-p-size"></div></div>
+                                <div class="ov-sec"><div class="t">Top 5 diseases</div><div id="ov-p-dis"></div></div>
+                                <div class="ov-sec"><div class="t">Annotation coverage</div><div class="ov-cov" id="ov-p-cov"></div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6 col-xxl-3"><div class="ov-card h-100"><h6>Countries</h6><div class="ov-sub">Papers mentioning each country</div><div id="ov-bars-country"></div></div></div>
+                        <div class="col-md-6 col-xxl-3"><div class="ov-card h-100"><h6>Diseases</h6><div class="ov-sub">DOID / MeSH</div><div id="ov-bars-diseases"></div></div></div>
+                        <div class="col-md-6 col-xxl-3"><div class="ov-card h-100"><h6>Pathogens</h6><div class="ov-sub">NCBI Taxonomy</div><div id="ov-bars-pathogens"></div></div></div>
+                        <div class="col-md-6 col-xxl-3"><div class="ov-card h-100"><h6>Non-human hosts</h6><div class="ov-sub">Humans: <span id="ov-n-humans"></span> papers (not shown)</div><div id="ov-bars-hosts"></div></div></div>
+                        <div class="col-12">
+                            <div class="ov-card">
+                                <h6>Papers per year, by disease</h6>
+                                <div class="ov-sub">Each paper counted once, under the first of the top 3 diseases it mentions; everything else is &ldquo;Other&rdquo;.</div>
+                                <div class="ov-legend mb-1" id="ov-year-legend"></div>
+                                <svg id="ov-years" width="100%" viewBox="0 0 1100 200"></svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-baseline gap-2 mb-2">
+                        <span class="ov-label">Models</span><span class="ov-mini" id="ov-grid-count"></span>
+                    </div>
+                    <div id="ov-toolbar" class="mb-3">
+                        <div class="ov-search"><i class="bi bi-search"></i><input id="ov-q" class="form-control" placeholder="Search title, author, PMID or concept" title="Matches title, authors, PMID, year and the models' variable names, groundings and context" autocomplete="off"><span id="ov-q-spin" class="spinner-border text-secondary" style="display:none"></span></div>
+                        <div class="sep"></div>
+                        <div class="position-relative" data-facet="diseases" data-name="Disease"></div>
+                        <div class="position-relative" data-facet="pathogens" data-name="Pathogen"></div>
+                        <div class="position-relative" data-facet="locations" data-name="Location"></div>
+                        <div class="position-relative" data-facet="hosts" data-name="Host"></div>
+                        <div class="sep"></div>
+                        <span class="ov-mini">Year</span>
+                        <select id="ov-y0" class="form-select" style="width:auto"></select><span class="ov-mini">&ndash;</span>
+                        <select id="ov-y1" class="form-select" style="width:auto"></select>
+                        <div class="sep"></div>
+                        <button class="ov-tb-btn" id="ov-scen" title="Papers with at least one extracted scenario"><i class="bi bi-sliders"></i>Has scenarios</button>
+                        <div class="sep"></div>
+                        <select id="ov-sort" class="form-select" style="width:auto">
+                            <option value="models">Most models</option>
+                            <option value="new">Newest first</option>
+                            <option value="old">Oldest first</option>
+                            <option value="title">Title A&ndash;Z</option>
+                        </select>
+                        <button class="btn btn-link btn-sm p-0" id="ov-reset">Reset</button>
+                        <div id="ov-dl" class="dropdown ms-auto">
+                            <button class="ov-tb-btn dropdown-toggle" data-bs-toggle="dropdown"
+                                    title="Download the highest priority model of each paper shown">
+                                <i class="bi bi-download"></i><span id="ov-dl-label">Download all models</span>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item small" href="#" data-format="json">JSON Lines</a></li>
+                                <li><a class="dropdown-item small" href="#" data-format="sbml">SBML (zip)</a></li>
+                                <li><a class="dropdown-item small" href="#" data-format="sympy">SymPy (zip)</a></li>
+                                <li id="ov-dl-note" class="px-3 pt-1 text-muted" style="font-size:.7rem;max-width:220px">
+                                    Filter the papers to download as SBML or SymPy
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                <div id="ov-tt"></div>
+
                 <div id="ep-grid">
                     <div class="text-center text-muted small py-5 w-100">
                         <span class="spinner-border spinner-border-sm me-1"></span> Loading&hellip;
@@ -443,6 +564,7 @@
                 </button>
                 <h5 id="detail-title" class="fw-bold text-dark mb-0"></h5>
                 <p id="detail-meta" class="text-muted small mb-3"></p>
+                <div id="detail-tags" class="mb-3" style="display:none;"></div>
                 <div id="detail-cards" class="d-flex flex-column gap-3"></div>
             </div>
 
@@ -468,8 +590,6 @@
 ════════════════════════════════════════════════════════════ */
 let allEpidemics = [];
 let selectedPmid = null;
-let searchDebounceTimer = null;
-let currentSearchController = null;
 
 /* Detail view: data and current dropdown selections for the open paper */
 let detailToken = 0;
@@ -525,99 +645,6 @@ function renderKatex(container) {
 function wrapLatex(lines) {
     return lines.map(l => `\\[ ${l} \\]`).join('\n');
 }
-
-/* ════════════════════════════════════════════════════════════
-   Sidebar rendering
-════════════════════════════════════════════════════════════ */
-function renderSidebar(list) {
-    const el = document.getElementById('sidebar-list');
-    if (!list.length) {
-        const q = document.getElementById('sidebar-search').value.trim();
-        el.innerHTML = `<p class="text-muted small text-center mt-4 px-2">
-            ${q ? 'No results found.' : 'Type to search by title, author, PMID, or grounding concept.'}
-        </p>`;
-        return;
-    }
-    el.innerHTML = list.map(ep => `
-        <button class="sidebar-item ${selectedPmid === ep.pmid ? 'active' : ''}"
-                data-pmid="${ep.pmid}">
-            <div class="fw-medium text-dark" style="font-size:.78rem;line-height:1.3">
-                ${titleOrPmidHtml(ep, true)}
-            </div>
-            <div class="text-muted" style="font-size:.7rem;margin-top:2px">
-                ${pmidLabelHtml(ep.pmid, true)}
-                ${ep.model_count ? `&middot; ${ep.model_count} extraction${ep.model_count !== 1 ? 's' : ''}` : ''}
-            </div>
-            <div class="text-muted" style="font-size:.7rem">
-                ${escHtml(ep.author_list || '')}${ep.pub_year ? ' &middot; ' + ep.pub_year : ''}
-            </div>
-        </button>
-    `).join('');
-
-    el.querySelectorAll('.sidebar-item').forEach(btn => {
-        btn.addEventListener('click', () => openDetail(btn.dataset.pmid));
-    });
-}
-
-/* ════════════════════════════════════════════════════════════
-   Server-side search
-════════════════════════════════════════════════════════════ */
-const searchSpinner = document.getElementById('search-spinner');
-
-// Point the bulk download menu at the models of the current search, one
-// per publication. Without a search only JSON Lines is offered, since
-// converting the whole corpus to SBML or SymPy is slow.
-function updateBulkDownload(q, count) {
-    document.getElementById('bulk-dl').hidden = Boolean(q) && !count;
-    document.getElementById('bulk-dl-label').textContent = q
-        ? `Download ${count} model${count !== 1 ? 's' : ''}`
-        : 'Download all models';
-    document.getElementById('bulk-dl-note').hidden = Boolean(q);
-    document.querySelectorAll('#bulk-dl a').forEach(a => {
-        const params = new URLSearchParams({ best: 'true', format: a.dataset.format });
-        if (q) params.set('q', q);
-        a.href = `/api/download?${params}`;
-        a.classList.toggle('disabled', !q && a.dataset.format !== 'json');
-    });
-}
-
-async function runSearch(q) {
-    if (currentSearchController) currentSearchController.abort();
-
-    if (!q) {
-        renderSidebar([]);
-        updateBulkDownload('', 0);
-        return;
-    }
-
-    currentSearchController = new AbortController();
-    searchSpinner.style.display = 'inline-block';
-
-    try {
-        const url = `/explorer/api/search?q=${encodeURIComponent(q)}`;
-        const resp = await fetch(url, { signal: currentSearchController.signal });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const results = await resp.json();
-        renderSidebar(results);
-        updateBulkDownload(q, results.length);
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        document.getElementById('sidebar-list').innerHTML =
-            `<p class="text-danger small text-center mt-4 px-2">Search failed.</p>`;
-        console.error('Search error:', err);
-    } finally {
-        searchSpinner.style.display = 'none';
-        currentSearchController = null;
-    }
-}
-
-updateBulkDownload('', 0);
-
-document.getElementById('sidebar-search').addEventListener('input', function () {
-    const q = this.value.trim();
-    clearTimeout(searchDebounceTimer);
-    searchDebounceTimer = setTimeout(() => runSearch(q), 300);
-});
 
 /* ════════════════════════════════════════════════════════════
    Grid summary load (lazy + concurrency cap)
@@ -690,11 +717,15 @@ function setupLazySummaryCards(grid) {
 ════════════════════════════════════════════════════════════ */
 function renderGrid() {
     const grid = document.getElementById('ep-grid');
-    if (!allEpidemics.length) {
-        grid.innerHTML = '<p class="text-muted small text-center py-5 w-100">No models found.</p>';
+    const visible = ovVisibleEpidemics();
+    ovUpdateGridCount(visible.length);
+    if (!visible.length) {
+        teardownLazySummaryCards();
+        grid.innerHTML = `<p class="text-muted small text-center py-5 w-100">${
+            allEpidemics.length ? 'No models match the filters.' : 'No models found.'}</p>`;
         return;
     }
-    grid.innerHTML = allEpidemics.map(ep => buildSummaryCard(ep)).join('');
+    grid.innerHTML = visible.map(ep => buildSummaryCard(ep)).join('');
 
     setupLazySummaryCards(grid);
 
@@ -720,6 +751,7 @@ function buildSummaryCard(ep) {
                 ].filter(Boolean).join(' &middot; ')}
             </div>
         </div>
+        ${ovAnnotationStrip(ep.pmid)}
         <div class="px-3 py-2" id="card-body-${ep.pmid}">
             <div class="text-center text-muted small py-3">
                 <span class="spinner-border spinner-border-sm"></span>
@@ -729,31 +761,40 @@ function buildSummaryCard(ep) {
 }
 
 /* Fetch models, pick the best one by priority, render a single static card */
+// Best model's LaTeX per PMID (null = no models), so cards redrawn by the
+// overview filters do not refetch their equations
+const summaryLatexCache = new Map();
+
 async function loadSummaryCard(pmid) {
     const container = document.getElementById(`card-body-${pmid}`);
     if (!container) return false;
 
     try {
-        const resp   = await fetch(`/explorer/api/pmids/${encodeURIComponent(pmid)}/models`);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const models = await resp.json();
+        let latexLines = summaryLatexCache.get(pmid);
+        if (latexLines === undefined) {
+            const resp   = await fetch(`/explorer/api/pmids/${encodeURIComponent(pmid)}/models`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const models = await resp.json();
+            latexLines = models.length ? pickBestModel(models).latex : null;
+            summaryLatexCache.set(pmid, latexLines);
+        }
 
-        if (!models.length) {
+        if (latexLines === null) {
             const card = container.closest('.ep-summary-card');
             if (card) card.remove();
             return true;
         }
 
-        const m = pickBestModel(models);
-
         container.innerHTML = `
             <div class="summary-eq-box" id="eqbox-${pmid}"
                  onclick="event.stopPropagation()">
-                ${wrapLatex(m.latex)}
+                ${wrapLatex(latexLines)}
             </div>
         `;
 
-        renderKatex(document.getElementById(`eqbox-${pmid}`));
+        // Query within the card: the grid may have been redrawn while the
+        // fetch was in flight, leaving this container detached
+        renderKatex(container.querySelector('.summary-eq-box'));
         return true;
 
     } catch (err) {
@@ -770,10 +811,6 @@ async function openDetail(pmid) {
     selectedPmid = pmid;
     const ep = allEpidemics.find(e => e.pmid === pmid);
 
-    document.querySelectorAll('.sidebar-item').forEach(b => {
-        b.classList.toggle('active', b.dataset.pmid === pmid);
-    });
-
     document.getElementById('grid-view').style.display   = 'none';
     document.getElementById('detail-view').style.display = 'block';
 
@@ -784,6 +821,7 @@ async function openDetail(pmid) {
             ep?.pub_year ? escHtml(String(ep.pub_year)) : '',
             pmidLabelHtml(pmid),
         ].filter(Boolean).join(' · ');
+    ovRenderDetailTags(pmid);
 
     const cardsEl = document.getElementById('detail-cards');
     cardsEl.innerHTML = `
@@ -1188,21 +1226,20 @@ document.getElementById('back-btn').addEventListener('click', () => {
     selectedPmid = null;
     document.getElementById('detail-view').style.display = 'none';
     document.getElementById('grid-view').style.display   = 'block';
-    document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
 });
 
 /* ════════════════════════════════════════════════════════════
    Init
 ════════════════════════════════════════════════════════════ */
 async function init() {
+    // The overview loads alongside the grid; if it fails, the grid still works
+    const overviewPromise = ovLoad();
     try {
         const resp   = await fetch('/explorer/api/pmids');
         allEpidemics = await resp.json();
-        renderSidebar([]);
         renderGrid();
+        await overviewPromise;
     } catch (err) {
-        document.getElementById('sidebar-list').innerHTML =
-            `<p class="text-danger small text-center mt-4">Failed to load.</p>`;
         document.getElementById('ep-grid').innerHTML =
             `<div class="alert alert-danger">Failed to load epidemics: ${err.message}</div>`;
     }
@@ -1283,6 +1320,600 @@ function pmidLabelHtml(pmid, stopClick) {
 
 function titleOrPmidHtml(ep, stopClick) {
     return ep.title ? escHtml(ep.title) : pmidLinkHtml(ep.pmid, stopClick);
+}
+
+/* ════════════════════════════════════════════════════════════
+   Overview: map + linked stats panel, term charts, card filters
+   Data: /explorer/api/overview (one entry per paper with a model).
+   Every filter (country, term facets, toolbar) applies to the whole
+   page: panel, charts and the card grid.
+════════════════════════════════════════════════════════════ */
+const OV = {
+    ready: false,
+    papers: [],
+    byPmid: new Map(),
+    countries: {},          // ISO2 -> {name, iso_numeric}
+    numToIso: {},           // ISO numeric (as on the world map) -> ISO2
+    world: null,
+    filters: [],            // {field, id, label}; field 'country' or a term field
+    // qPmids: PMIDs the server search returned for q (null while pending)
+    tb: { q: '', qPmids: null, y0: null, y1: null, scen: false, sort: 'models' },
+};
+const OV_HUMAN = 'ncbitaxon:9606';
+const OV_FIELD_ICON = { diseases: 'bi-virus2', pathogens: 'bi-bug', locations: 'bi-geo-alt', hosts: 'bi-person' };
+const OV_SEQ = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf', '#184f95', '#0d366b'];
+// Compartment histogram bins; the last bin is "12 or more"
+const OV_SIZE_BINS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const ovFmt = n => Number(n).toLocaleString();
+
+async function ovLoad() {
+    try {
+        const [resp, world] = await Promise.all([
+            fetch('/explorer/api/overview'),
+            d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-110m.json').catch(err => {
+                console.error('World map load error:', err);
+                return null;
+            }),
+        ]);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        OV.papers = data.papers;
+        OV.papers.forEach(p => OV.byPmid.set(p.pmid, p));
+        OV.countries = data.countries;
+        Object.entries(OV.countries).forEach(([iso2, c]) => { OV.numToIso[String(+c.iso_numeric)] = iso2; });
+        OV.world = world;
+        OV.ready = true;
+        ovInitToolbar();
+        document.getElementById('overview').style.display = '';
+        // No filters are active yet, so keep the cards already drawn (and
+        // their in-flight equation loads) and just add the annotation strips
+        ovRender({ grid: false });
+        ovDecorateCards();
+        // A paper opened before the overview loaded gets its tags now
+        if (selectedPmid) ovRenderDetailTags(selectedPmid);
+    } catch (err) {
+        // Leave the overview hidden; the card grid works without it
+        console.error('Overview load error:', err);
+    }
+}
+
+/* ── Filtering ── */
+function ovPassesToolbar(p) {
+    const tb = OV.tb;
+    if (tb.y0 && !(p.pub_year >= tb.y0)) return false;
+    if (tb.y1 && !(p.pub_year <= tb.y1)) return false;
+    if (tb.scen && !p.scenario_count) return false;
+    if (tb.q && tb.qPmids) {
+        if (!tb.qPmids.has(p.pmid)) return false;
+    } else if (tb.q) {
+        // Until the server search answers, match on the fields we have
+        const q = tb.q.toLowerCase();
+        if (!(p.pmid.includes(q)
+              || (p.title || '').toLowerCase().includes(q)
+              || (p.author_list || '').toLowerCase().includes(q))) return false;
+    }
+    return true;
+}
+function ovMatchFilter(p, f) {
+    return f.field === 'country' ? p.countries.includes(f.id) : p[f.field].some(t => t.id === f.id);
+}
+// countryOverride: undefined = use the current filters; null = ignore the
+// country filter; an ISO2 code = use that country instead (hover preview)
+function ovMatches(p, countryOverride) {
+    if (!ovPassesToolbar(p)) return false;
+    let fs = OV.filters;
+    if (countryOverride !== undefined) {
+        fs = fs.filter(f => f.field !== 'country');
+        if (countryOverride) fs = fs.concat([{ field: 'country', id: countryOverride }]);
+    }
+    return fs.every(f => ovMatchFilter(p, f));
+}
+function ovSelection() { return OV.papers.filter(p => ovMatches(p)); }
+function ovHasFilters() {
+    const tb = OV.tb;
+    return OV.filters.length > 0 || Boolean(tb.q || tb.y0 || tb.y1 || tb.scen);
+}
+function ovToggle(field, id, label) {
+    if (field === 'country') {
+        // One country at a time keeps the panel readable
+        const cur = OV.filters.findIndex(f => f.field === 'country');
+        const same = cur >= 0 && OV.filters[cur].id === id;
+        if (cur >= 0) OV.filters.splice(cur, 1);
+        if (!same) OV.filters.push({ field, id, label });
+    } else {
+        const i = OV.filters.findIndex(f => f.field === field && f.id === id);
+        if (i >= 0) OV.filters.splice(i, 1); else OV.filters.push({ field, id, label });
+    }
+    ovRender();
+}
+
+const OV_SORTS = {
+    models: (a, b) => (b.model_count || 0) - (a.model_count || 0),
+    new: (a, b) => (b.pub_year || 0) - (a.pub_year || 0) || (b.model_count || 0) - (a.model_count || 0),
+    old: (a, b) => (a.pub_year || 9999) - (b.pub_year || 9999),
+    title: (a, b) => (a.title || '').localeCompare(b.title || ''),
+};
+// Cards to show in the grid, after overview filters and sorting
+function ovVisibleEpidemics() {
+    if (!OV.ready) return allEpidemics;
+    const active = ovHasFilters();
+    return allEpidemics
+        .filter(ep => {
+            const p = OV.byPmid.get(ep.pmid);
+            return p ? ovMatches(p) : !active;
+        })
+        .sort(OV_SORTS[OV.tb.sort] || OV_SORTS.models);
+}
+function ovUpdateGridCount(n) {
+    const el = document.getElementById('ov-grid-count');
+    if (el) el.textContent = `${ovFmt(n)} paper${n !== 1 ? 's' : ''}${OV.ready && ovHasFilters() ? ' match the filters' : ''}`;
+    ovUpdateDownload(n);
+}
+
+/* ── Bulk download of the papers shown in the grid ── */
+// Without filters only JSON Lines is offered, since converting the whole
+// corpus to SBML or SymPy is slow
+function ovUpdateDownload(n) {
+    const filtered = OV.ready && ovHasFilters();
+    document.getElementById('ov-dl').hidden = filtered && !n;
+    document.getElementById('ov-dl-label').textContent = filtered
+        ? `Download ${ovFmt(n)} model${n !== 1 ? 's' : ''}`
+        : 'Download all models';
+    document.getElementById('ov-dl-note').hidden = filtered;
+    document.querySelectorAll('#ov-dl a').forEach(a => {
+        a.classList.toggle('disabled', !filtered && a.dataset.format !== 'json');
+    });
+}
+
+async function ovDownload(format) {
+    const btn = document.querySelector('#ov-dl > button');
+    const save = (href, name) => {
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    };
+    if (!(OV.ready && ovHasFilters())) {
+        // The whole corpus streams straight from the API
+        save(`/api/download?${new URLSearchParams({ best: 'true', format })}`, 'models.jsonl');
+        return;
+    }
+    const pmids = ovVisibleEpidemics().map(ep => ep.pmid);
+    if (!pmids.length) return;
+    btn.classList.add('busy');
+    try {
+        // POST, since the PMID list can be too long for a URL
+        const resp = await fetch('/api/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pmid: pmids, best: true, format }),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const blob = await resp.blob();
+        const name = (resp.headers.get('Content-Disposition') || '').match(/filename="?([^";]+)"?/)?.[1]
+            || (format === 'json' ? 'models.jsonl' : `models_${format}.zip`);
+        const url = URL.createObjectURL(blob);
+        save(url, name);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+        alert(`Download failed: ${err.message}`);
+        console.error('Bulk download error:', err);
+    } finally {
+        btn.classList.remove('busy');
+    }
+}
+
+/* ── Tooltip ── */
+const ovTT = document.getElementById('ov-tt');
+function ovShowTT(e, html) {
+    ovTT.innerHTML = html;
+    ovTT.style.opacity = 1;
+    ovTT.style.left = (e.clientX + 12) + 'px';
+    ovTT.style.top = (e.clientY + 12) + 'px';
+}
+function ovHideTT() { ovTT.style.opacity = 0; }
+
+/* ── Counting ── */
+function ovCountField(sel, field, exclude) {
+    const m = new Map();
+    sel.forEach(p => {
+        const seen = new Set();
+        p[field].forEach(t => {
+            if ((exclude && exclude(t)) || seen.has(t.id)) return;
+            seen.add(t.id);
+            const e = m.get(t.id) || { id: t.id, label: t.label, n: 0 };
+            e.n++;
+            m.set(t.id, e);
+        });
+    });
+    return [...m.values()].sort((a, b) => b.n - a.n);
+}
+
+function ovHbars(elId, rows, field, total) {
+    const el = document.getElementById(elId);
+    const top = rows.slice(0, 8), max = top.length ? top[0].n : 1;
+    if (!top.length) { el.innerHTML = '<div class="ov-mini">None in this selection.</div>'; return; }
+    el.innerHTML = top.map(r => {
+        const act = OV.filters.some(f => f.field === field && f.id === r.id) ? ' active' : '';
+        return `<div class="ov-hbar-row${act}" data-id="${escHtml(r.id)}">
+            <div class="name" title="${escHtml(r.label)}">${escHtml(r.label)}</div>
+            <div><div class="fill" style="width:${(r.n / max * 100).toFixed(1)}%"></div></div>
+            <div class="val">${r.n}</div></div>`;
+    }).join('');
+    el.querySelectorAll('.ov-hbar-row').forEach(row => {
+        const r = top.find(x => x.id === row.dataset.id);
+        row.onmousemove = e => {
+            ovShowTT(e, `<b>${escHtml(r.label)}</b><br>${escHtml(r.id)}<br>${r.n} papers (${(r.n / (total || 1) * 100).toFixed(1)}% of selection)`);
+            if (field === 'country') ovRenderPanel(r.id);
+        };
+        row.onmouseleave = () => { ovHideTT(); if (field === 'country') ovRenderPanel(); };
+        row.onclick = () => { ovHideTT(); ovToggle(field, r.id, r.label); };
+    });
+}
+
+/* ── Filter chips (header of the explore card) ── */
+function ovRenderFilters() {
+    const el = document.getElementById('ov-filters');
+    if (!OV.filters.length) {
+        el.innerHTML = '<span class="ov-mini text-muted">Hover a country to preview &middot; click to filter</span>';
+        return;
+    }
+    el.innerHTML = '<span class="ov-mini">Filtered by</span>' + OV.filters.map((f, i) => `
+        <button class="ov-fchip ${f.field === 'country' ? 'country' : ''}" data-i="${i}">
+            <i class="bi ${f.field === 'country' ? 'bi-geo-alt-fill' : OV_FIELD_ICON[f.field] || ''}"></i>${escHtml(f.label)}
+            <i class="bi bi-x-lg"></i></button>`).join('') +
+        ' <button class="btn btn-link btn-sm p-0 ms-1" id="ov-clear">Clear all</button>';
+    el.querySelectorAll('.ov-fchip').forEach(b => b.onclick = () => { OV.filters.splice(+b.dataset.i, 1); ovRender(); });
+    document.getElementById('ov-clear').onclick = () => { OV.filters.length = 0; ovRender(); };
+}
+
+/* ── Model size: compartments in each paper's preferred model ──
+   Single-equation models are failed extractions (e.g. dS/dt = S*beta), so
+   they are left out of the size stat and counted separately. */
+function ovSizes(sel) {
+    return sel.map(p => p.compartments).filter(n => n >= 2).sort((a, b) => a - b);
+}
+function ovSizeStat(sel) {
+    const s = ovSizes(sel);
+    if (!s.length) return '<div class="ov-stat"><div class="num">&ndash;</div><div class="lbl">median compartments</div></div>';
+    const med = d3.median(s);
+    return `<div class="ov-stat" title="Median number of compartments in each paper's model, as shown on its card">
+        <div class="num">${Number.isInteger(med) ? med : med.toFixed(1)}</div>
+        <div class="lbl">median compartments</div>
+        <div class="ov-det">range ${s[0]}&ndash;${s[s.length - 1]}</div></div>`;
+}
+function ovRenderSizeHist(sel) {
+    const s = ovSizes(sel);
+    const broken = sel.filter(p => !(p.compartments >= 2)).length;
+    const last = OV_SIZE_BINS.length - 1;
+    const counts = OV_SIZE_BINS.map((b, i) => s.filter(n => i === last ? n >= b : n === b).length);
+    const max = d3.max(counts) || 1;
+    const med = s.length ? d3.median(s) : null;
+    const el = document.getElementById('ov-p-size');
+    el.innerHTML = `
+        <div class="ov-hist">${counts.map((c, i) => {
+            const b = OV_SIZE_BINS[i];
+            const isMed = med !== null && (i === last ? med >= b : Math.round(med) === b);
+            return `<div class="hcol" data-i="${i}"><div class="hbar${isMed ? ' med' : ''}" style="height:${c ? Math.max(2, c / max * 100) : 0}%"></div></div>`;
+        }).join('')}</div>
+        <div class="ov-hist-x">${OV_SIZE_BINS.map((b, i) => `<span>${i === last ? b + '+' : b}</span>`).join('')}</div>
+        ${broken ? `<div class="ov-det mt-1">${ovFmt(broken)} paper${broken !== 1 ? 's' : ''} with a single-equation model not counted</div>` : ''}`;
+    el.querySelectorAll('.hcol').forEach(col => {
+        const i = +col.dataset.i, b = OV_SIZE_BINS[i];
+        col.onmousemove = e => ovShowTT(e, `<b>${i === last ? b + ' or more' : b} compartments</b><br>${counts[i]} papers`);
+        col.onmouseleave = ovHideTT;
+    });
+}
+
+/* ── Linked stats panel ── */
+function ovRenderPanel(previewIso) {
+    const countryF = OV.filters.find(f => f.field === 'country');
+    const selectedIso = countryF && countryF.id;
+    const iso = previewIso || selectedIso;
+    const isPreview = Boolean(previewIso) && previewIso !== selectedIso;
+    const sel = previewIso ? OV.papers.filter(p => ovMatches(p, previewIso)) : ovSelection();
+
+    const panel = document.getElementById('ov-panel');
+    panel.classList.toggle('is-country', Boolean(iso));
+    panel.classList.toggle('is-preview', isPreview);
+    const others = OV.filters.filter(f => f.field !== 'country').map(f => f.label);
+    document.getElementById('ov-p-state').textContent =
+        isPreview ? 'Previewing · click to filter' : iso ? 'Selected country' : 'All countries';
+    document.getElementById('ov-p-name').textContent =
+        (iso ? (OV.countries[iso]?.name || iso) : 'Worldwide') + (others.length ? ' · ' + others.join(', ') : '');
+
+    const models = d3.sum(sel, p => p.model_count);
+    const withScen = sel.filter(p => p.scenario_count).length;
+    const pct = v => sel.length ? Math.round(v / sel.length * 100) : 0;
+    document.getElementById('ov-p-stats').innerHTML = `
+        <div class="ov-stat"><div class="num">${ovFmt(sel.length)}</div><div class="lbl">papers</div></div>
+        <div class="ov-stat"><div class="num">${ovFmt(models)}</div><div class="lbl">extracted models</div></div>
+        <div class="ov-stat" title="Papers with at least one extracted scenario (parameter values from the paper)">
+            <div class="num">${ovFmt(withScen)}</div><div class="lbl">papers with scenarios &middot; ${pct(withScen)}%</div>
+            <div class="ov-sbar"><div style="width:${pct(withScen)}%"></div></div></div>
+        ${ovSizeStat(sel)}`;
+    ovRenderSizeHist(sel);
+
+    const dis = ovCountField(sel, 'diseases').slice(0, 5);
+    const dmax = dis.length ? dis[0].n : 1;
+    const disEl = document.getElementById('ov-p-dis');
+    disEl.innerHTML = dis.length ? dis.map((d, i) => `
+        <div class="ov-dis-row" data-id="${escHtml(d.id)}" data-label="${escHtml(d.label)}">
+            <div class="rk">${i + 1}</div>
+            <div><div class="nm">${escHtml(d.label)}</div><div class="bar"><div style="width:${(d.n / dmax * 100).toFixed(1)}%"></div></div></div>
+            <div class="v">${d.n}</div></div>`).join('') : '<div class="ov-mini">None</div>';
+    disEl.querySelectorAll('.ov-dis-row').forEach(r => r.onclick = () => ovToggle('diseases', r.dataset.id, r.dataset.label));
+
+    document.getElementById('ov-p-cov').innerHTML = [
+        ['Disease', pct(sel.filter(p => p.diseases.length).length)],
+        ['Pathogen', pct(sel.filter(p => p.pathogens.length).length)],
+        ['Location', pct(sel.filter(p => p.locations.length).length)],
+    ].map(([l, v]) => `<div><div class="lbl"><span>${l}</span><span>${v}%</span></div><div class="ov-sbar"><div style="width:${v}%"></div></div></div>`).join('');
+}
+
+/* ── Map ── */
+const ovProj = d3.geoNaturalEarth1().scale(170).translate([470, 250]);
+const ovPath = d3.geoPath(ovProj);
+function ovRenderMap() {
+    // Map counts ignore the country filter itself, so other countries stay visible
+    const base = OV.papers.filter(p => ovMatches(p, null));
+    const counts = new Map();
+    base.forEach(p => p.countries.forEach(c => counts.set(c, (counts.get(c) || 0) + 1)));
+    const max = d3.max(counts.values()) || 1;
+    const scale = d3.scaleQuantize().domain([0, Math.log10(max + 1)]).range(OV_SEQ);
+    const selIso = (OV.filters.find(f => f.field === 'country') || {}).id;
+
+    if (OV.world) {
+        const isoOf = d => OV.numToIso[String(+d.id)];
+        const feats = topojson.feature(OV.world, OV.world.objects.countries).features
+            .filter(f => f.properties.name !== 'Antarctica');
+        d3.select('#ov-map').selectAll('path.ov-country').data(feats, d => d.properties.name).join('path')
+            // Some map shapes have no country code, so require a selection
+            .attr('class', d => 'ov-country' + (selIso && isoOf(d) === selIso ? ' sel' : ''))
+            .attr('d', ovPath)
+            .attr('fill', d => { const c = counts.get(isoOf(d)); return c ? scale(Math.log10(c + 1)) : 'var(--ov-seq0)'; })
+            .on('mouseenter', function (e, d) { if (counts.get(isoOf(d))) { d3.select(this).raise(); ovRenderPanel(isoOf(d)); } })
+            .on('mousemove', (e, d) => ovShowTT(e, `<b>${escHtml(OV.countries[isoOf(d)]?.name || d.properties.name)}</b><br>${counts.get(isoOf(d)) || 0} papers`))
+            .on('mouseleave', () => { ovHideTT(); ovRenderPanel(); d3.select('#ov-map path.sel').raise(); })
+            .on('click', (e, d) => {
+                const iso = isoOf(d);
+                if (iso && counts.get(iso)) { ovHideTT(); ovToggle('country', iso, OV.countries[iso]?.name || iso); }
+            });
+        d3.select('#ov-map path.sel').raise();
+    }
+
+    const stops = scale.range().map(c => { const [a, b] = scale.invertExtent(c); return [c, Math.round(10 ** a - 1), Math.round(10 ** b - 1)]; });
+    document.getElementById('ov-map-legend').innerHTML =
+        '<span><span class="ov-swatch" style="background:var(--ov-seq0);border:1px solid #dde"></span>0</span>' +
+        stops.map(([c, a, b]) => `<span><span class="ov-swatch" style="background:${c}"></span>${Math.max(1, a)}&ndash;${b}</span>`).join('');
+
+    const rows = [...counts.entries()]
+        .map(([iso, n]) => ({ id: iso, label: OV.countries[iso]?.name || iso, n }))
+        .sort((a, b) => b.n - a.n);
+    ovHbars('ov-bars-country', rows, 'country', base.length);
+}
+
+/* ── Papers per year, stacked by disease ── */
+function ovRenderYears(sel) {
+    const svg = d3.select('#ov-years');
+    svg.selectAll('*').remove();
+    const W = 1100, H = 200, m = { l: 36, r: 8, t: 8, b: 24 };
+    const dated = sel.filter(p => p.pub_year);
+    // Pick 3 diseases greedily so each paper falls into exactly one stack:
+    // the next pick is the most common disease among papers not yet covered
+    const top3 = [];
+    let rest = dated;
+    for (let i = 0; i < 3; i++) {
+        const c = ovCountField(rest, 'diseases')[0];
+        if (!c) break;
+        top3.push(c);
+        rest = rest.filter(p => !p.diseases.some(t => t.id === c.id));
+    }
+    const keys = [...top3.map(d => d.id), 'other'];
+    const names = Object.fromEntries(top3.map(d => [d.id, d.label]));
+    names.other = 'Other / none';
+    const col = k => k === 'other' ? 'var(--ov-other)' : ['var(--ov-s1)', 'var(--ov-s2)', 'var(--ov-s3)'][keys.indexOf(k)];
+    const allYears = OV.papers.map(p => p.pub_year).filter(Boolean);
+    if (!allYears.length) return;
+    const years = d3.range(d3.min(allYears), d3.max(allYears) + 1);
+    const rows = years.map(y => {
+        const r = { year: y };
+        keys.forEach(k => r[k] = 0);
+        dated.filter(p => p.pub_year === y).forEach(p => {
+            const k = keys.find(k => k !== 'other' && p.diseases.some(t => t.id === k)) || 'other';
+            r[k]++;
+        });
+        return r;
+    });
+    const x = d3.scaleBand().domain(years).range([m.l, W - m.r]).padding(0.25);
+    const y = d3.scaleLinear().domain([0, d3.max(rows, r => keys.reduce((s, k) => s + r[k], 0)) || 1]).nice().range([H - m.b, m.t]);
+    svg.append('g').selectAll('line').data(y.ticks(4)).join('line')
+        .attr('x1', m.l).attr('x2', W - m.r).attr('y1', d => y(d)).attr('y2', d => y(d)).attr('stroke', 'var(--ov-grid)');
+    svg.append('g').selectAll('text').data(y.ticks(4)).join('text')
+        .attr('x', m.l - 6).attr('y', d => y(d) + 3).attr('text-anchor', 'end').attr('font-size', 10).attr('fill', 'var(--ov-ink-3)').text(d => d);
+    svg.append('g').selectAll('text').data(years).join('text')
+        .attr('x', d => x(d) + x.bandwidth() / 2).attr('y', H - 6).attr('text-anchor', 'middle').attr('font-size', 10).attr('fill', 'var(--ov-ink-3)').text(d => d);
+    d3.stack().keys(keys)(rows).forEach(s => {
+        svg.append('g').selectAll('rect').data(s).join('rect')
+            .attr('x', d => x(d.data.year)).attr('width', x.bandwidth())
+            .attr('y', d => y(d[1])).attr('height', d => Math.max(0, y(d[0]) - y(d[1]) - (d[1] - d[0] > 0 ? 1 : 0)))
+            .attr('fill', col(s.key))
+            .on('mousemove', (e, d) => ovShowTT(e, `<b>${d.data.year}</b><br>` + keys.map(k =>
+                `<span class="ov-swatch" style="background:${col(k)}"></span>${escHtml(names[k])}: ${d.data[k]}`).join('<br>')))
+            .on('mouseleave', ovHideTT);
+    });
+    document.getElementById('ov-year-legend').innerHTML = keys.map(k =>
+        `<span><span class="ov-swatch" style="background:${col(k)}"></span>${escHtml(names[k])}</span>`).join('');
+}
+
+/* ── Toolbar above the cards ── */
+function ovCloseMenus() { document.querySelectorAll('.ov-facet-menu.show').forEach(m => m.classList.remove('show')); }
+document.addEventListener('click', ovCloseMenus);
+
+function ovFacetButton(holder) {
+    const field = holder.dataset.facet, name = holder.dataset.name;
+    const active = OV.filters.filter(f => f.field === field);
+    holder.innerHTML = `
+        <button class="ov-tb-btn ${active.length ? 'on' : ''}"><i class="bi ${OV_FIELD_ICON[field]}"></i>${name}${active.length ? ` &middot; ${active.length}` : ''}
+            <i class="bi bi-chevron-down" style="font-size:.6rem"></i></button>
+        <div class="ov-facet-menu dropdown-menu shadow-sm">
+            <input class="form-control form-control-sm" placeholder="Filter ${name.toLowerCase()}s">
+            <div class="list"></div></div>`;
+    const btn = holder.querySelector('button');
+    const menu = holder.querySelector('.ov-facet-menu');
+    const input = menu.querySelector('input');
+    const list = menu.querySelector('.list');
+    const fill = () => {
+        // Counts reflect every filter except this facet's own selections
+        const sel = OV.papers.filter(p => ovPassesToolbar(p) && OV.filters.every(f => f.field === field || ovMatchFilter(p, f)));
+        const q = input.value.toLowerCase();
+        const rows = ovCountField(sel, field).filter(r => !q || r.label.toLowerCase().includes(q)).slice(0, 60);
+        list.innerHTML = rows.map(r => `
+            <div class="ov-facet-item ${OV.filters.some(f => f.field === field && f.id === r.id) ? 'on' : ''}"
+                 data-id="${escHtml(r.id)}" data-label="${escHtml(r.label)}">
+                <span>${escHtml(r.label)}</span><span class="c">${r.n}</span></div>`).join('')
+            || '<div class="ov-mini p-1">No matches</div>';
+        list.querySelectorAll('.ov-facet-item').forEach(it => it.onclick = e => {
+            e.stopPropagation();
+            ovToggle(field, it.dataset.id, it.dataset.label);
+        });
+    };
+    btn.onclick = e => {
+        e.stopPropagation();
+        const open = menu.classList.contains('show');
+        ovCloseMenus();
+        if (!open) { menu.classList.add('show'); fill(); input.focus(); }
+    };
+    input.oninput = fill;
+    menu.onclick = e => e.stopPropagation();
+}
+
+function ovRenderToolbar() {
+    document.querySelectorAll('#ov-toolbar [data-facet]').forEach(ovFacetButton);
+    document.getElementById('ov-scen').classList.toggle('on', OV.tb.scen);
+}
+
+function ovInitToolbar() {
+    const years = [...new Set(OV.papers.map(p => p.pub_year).filter(Boolean))].sort();
+    const y0 = document.getElementById('ov-y0'), y1 = document.getElementById('ov-y1');
+    const opts = '<option value="">Any</option>' + years.map(y => `<option>${y}</option>`).join('');
+    y0.innerHTML = opts;
+    y1.innerHTML = opts;
+    y0.onchange = () => { OV.tb.y0 = +y0.value || null; ovRender(); };
+    y1.onchange = () => { OV.tb.y1 = +y1.value || null; ovRender(); };
+    // Search runs on the server, which also matches the models' variable
+    // names, groundings and context values
+    let timer, controller;
+    const spin = document.getElementById('ov-q-spin');
+    const cancelSearch = () => {
+        clearTimeout(timer);
+        if (controller) controller.abort();
+        controller = null;
+        spin.style.display = 'none';
+    };
+    document.getElementById('ov-q').oninput = e => {
+        cancelSearch();
+        timer = setTimeout(async () => {
+            const q = e.target.value.trim();
+            Object.assign(OV.tb, { q, qPmids: null });
+            if (!q) { ovRender(); return; }
+            controller = new AbortController();
+            spin.style.display = 'inline-block';
+            try {
+                const resp = await fetch(`/explorer/api/search?q=${encodeURIComponent(q)}`, { signal: controller.signal });
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                OV.tb.qPmids = new Set((await resp.json()).map(r => r.pmid));
+            } catch (err) {
+                if (err.name === 'AbortError') return;
+                // Fall back to matching title, author and PMID in the page
+                console.error('Search error:', err);
+            } finally {
+                spin.style.display = 'none';
+            }
+            controller = null;
+            ovRender();
+        }, 300);
+    };
+    document.querySelectorAll('#ov-dl a').forEach(a => {
+        a.onclick = e => {
+            e.preventDefault();
+            if (!a.classList.contains('disabled')) ovDownload(a.dataset.format);
+        };
+    });
+    document.getElementById('ov-scen').onclick = () => { OV.tb.scen = !OV.tb.scen; ovRender(); };
+    document.getElementById('ov-sort').onchange = e => { OV.tb.sort = e.target.value; renderGrid(); };
+    document.getElementById('ov-reset').onclick = () => {
+        cancelSearch();
+        Object.assign(OV.tb, { q: '', qPmids: null, y0: null, y1: null, scen: false });
+        document.getElementById('ov-q').value = '';
+        y0.value = '';
+        y1.value = '';
+        OV.filters.length = 0;
+        ovRender();
+    };
+}
+
+/* ── Annotation strip on summary cards ── */
+function ovAnnotationStrip(pmid) {
+    const p = OV.byPmid.get(pmid);
+    if (!p) return '';
+    const chip = (cls, icon, t) =>
+        `<span class="ann-chip ${cls}" title="${escHtml(t.id)}"><i class="bi ${icon}"></i>${escHtml(t.label)}</span>`;
+    const items = [
+        ...p.diseases.slice(0, 2).map(t => chip('dis', 'bi-virus2', t)),
+        ...p.pathogens.slice(0, 1).map(t => chip('pat', 'bi-bug', t)),
+        ...p.locations.slice(0, 2).map(t => chip('loc', 'bi-geo-alt', t)),
+    ];
+    const more = Math.max(0, p.diseases.length - 2) + Math.max(0, p.pathogens.length - 1) + Math.max(0, p.locations.length - 2);
+    if (more) items.push(`<span class="ov-mini">+${more}</span>`);
+    return items.length ? `<div class="ann-strip">${items.join('')}</div>` : '';
+}
+
+// All annotation terms of a paper, one row per field, on the detail page
+const OV_DETAIL_FIELDS = [
+    ['diseases', 'Diseases', 'dis', 'bi-virus2'],
+    ['pathogens', 'Pathogens', 'pat', 'bi-bug'],
+    ['hosts', 'Hosts', 'host', 'bi-person'],
+    ['locations', 'Locations', 'loc', 'bi-geo-alt'],
+];
+function ovRenderDetailTags(pmid) {
+    const el = document.getElementById('detail-tags');
+    const p = OV.byPmid.get(pmid);
+    const rows = p ? OV_DETAIL_FIELDS.filter(([field]) => p[field].length).map(([field, name, cls, icon]) => `
+        <div class="dt-row">
+            <div class="dt-name">${name}</div>
+            <div>${p[field].map(t =>
+                `<span class="ann-chip ${cls}" title="${escHtml(t.id)}"><i class="bi ${icon}"></i>${escHtml(t.label)}</span>`
+            ).join('')}</div>
+        </div>`) : [];
+    el.innerHTML = rows.join('');
+    el.style.display = rows.length ? '' : 'none';
+}
+
+function ovDecorateCards() {
+    document.querySelectorAll('#ep-grid .ep-summary-card').forEach(card => {
+        if (card.querySelector('.ann-strip')) return;
+        const strip = ovAnnotationStrip(card.dataset.pmid);
+        if (strip) card.querySelector('.border-bottom').insertAdjacentHTML('afterend', strip);
+    });
+    ovUpdateGridCount(document.querySelectorAll('#ep-grid .ep-summary-card').length);
+}
+
+function ovRender({ grid = true } = {}) {
+    if (!OV.ready) return;
+    const sel = ovSelection();
+    ovRenderFilters();
+    ovRenderToolbar();
+    ovRenderPanel();
+    ovRenderMap();
+    ovRenderYears(sel);
+    ovHbars('ov-bars-diseases', ovCountField(sel, 'diseases'), 'diseases', sel.length);
+    ovHbars('ov-bars-pathogens', ovCountField(sel, 'pathogens'), 'pathogens', sel.length);
+    ovHbars('ov-bars-hosts', ovCountField(sel, 'hosts', t => t.id === OV_HUMAN), 'hosts', sel.length);
+    document.getElementById('ov-n-humans').textContent = ovFmt(sel.filter(p => p.hosts.some(t => t.id === OV_HUMAN)).length);
+    if (grid) renderGrid();
 }
 
 init();

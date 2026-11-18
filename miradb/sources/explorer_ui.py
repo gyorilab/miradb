@@ -1,4 +1,7 @@
 import logging
+import threading
+import time
+from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request, send_file, abort
 import json
@@ -90,6 +93,78 @@ def get_all_pmids():
     """
     rows = queries.list_publication_summaries(get_db_client())
     return jsonify(rows)
+
+
+# GeoNames location ID -> country code, built by
+# scripts/build_geonames_countries.py
+GEONAMES_COUNTRIES_PATH = Path(__file__).parent / "geonames_countries.json"
+
+OVERVIEW_TTL_SECONDS = 600
+_overview_cache = {"data": None, "time": 0.0}
+_overview_lock = threading.Lock()
+
+
+def _load_geonames_countries() -> dict:
+    try:
+        return json.loads(GEONAMES_COUNTRIES_PATH.read_text())
+    except FileNotFoundError:
+        logger.warning(
+            "%s not found; run scripts/build_geonames_countries.py. "
+            "The overview map will be empty.", GEONAMES_COUNTRIES_PATH
+        )
+        return {"locations": {}, "countries": {}}
+
+
+def _build_overview() -> dict:
+    geo = _load_geonames_countries()
+    to_country = geo["locations"]
+    papers = queries.list_annotation_overview(get_db_client())
+    for paper in papers:
+        paper["countries"] = sorted({
+            to_country[t["id"].partition(":")[2]]
+            for t in paper["locations"]
+            if t["id"].startswith("geonames:")
+            and t["id"].partition(":")[2] in to_country
+        })
+    return {"papers": papers, "countries": geo["countries"]}
+
+
+@explorer_blueprint.route("/api/overview")
+def get_overview():
+    """Return per-paper annotations for the explorer overview map and charts.
+
+    The response is cached for OVERVIEW_TTL_SECONDS, since it covers every
+    publication and the underlying data changes only on ingestion.
+
+    Response format:
+    {
+        "papers": [
+            {
+                "pmid": "34671103",
+                "title": "...",
+                "author_list": "...",
+                "pub_year": 2021,
+                "model_count": 5,
+                "scenario_count": 1,
+                "diseases":  [{"id": "doid:0080600", "label": "COVID-19"}],
+                "pathogens": [...],
+                "hosts":     [...],
+                "locations": [{"id": "geonames:1733045", "label": "Malaysia"}],
+                "countries": ["MY", "CN"],
+                "compartments": 3
+            },
+            ...
+        ],
+        "countries": {"MY": {"name": "Malaysia", "iso_numeric": "458"}, ...}
+    }
+    """
+    with _overview_lock:
+        now = time.monotonic()
+        if (_overview_cache["data"] is None
+                or now - _overview_cache["time"] > OVERVIEW_TTL_SECONDS):
+            _overview_cache["data"] = _build_overview()
+            _overview_cache["time"] = now
+        return jsonify(_overview_cache["data"])
 
 
 @explorer_blueprint.route("/api/pmids/<pmid>/models")

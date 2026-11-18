@@ -1,9 +1,9 @@
 import logging
 
 from sqlalchemy.orm import declarative_base
-from sqlalchemy import Column, Integer, Float, String, CheckConstraint, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, Integer, Float, String, CheckConstraint, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSON, ARRAY
+from sqlalchemy.dialects.postgresql import JSON, JSONB, ARRAY
 
 from datetime import datetime, timezone
 
@@ -40,6 +40,13 @@ class TextRef(Base, EpiTable):
         back_populates="text_ref_obj",
         cascade="all, delete-orphan",
     )
+    annotation = relationship(
+        "TextAnnotation",
+        back_populates="text_ref_obj",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self):
         return f"<TextRef(id='{self.id}', pmid='{self.pmid}')>"
@@ -55,6 +62,69 @@ class TextRef(Base, EpiTable):
             'journal': self.journal,
             'year': self.year,
             'keywords': self.keywords,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class TextAnnotation(Base, EpiTable):
+    """Paper-level MIRA ``Annotations`` that are not already in TextRef.
+
+    One row per paper, keyed by PMID. Title, authors, DOI, PMCID, journal,
+    year and keywords stay in ``text_references``; this table holds the rest
+    of the MIRA ``Annotations`` fields. Each term list holds CURIEs
+    (diseases: doid/mondo/mesh, pathogens and hosts: ncbitaxon/mesh,
+    locations: geonames, model_types: mamo), and ``term_provenance`` records
+    each term's label and the sources that found it, e.g.
+    ``{"diseases": {"doid:0080600": {"label": "COVID-19",
+    "sources": ["mesh", "pubtator"]}}}``.
+    """
+    __tablename__ = 'text_annotations'
+
+    id = Column(Integer, primary_key=True)
+    pmid = Column(
+        String,
+        ForeignKey("text_references.pmid", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    abstract = Column(String, nullable=True)
+    license = Column(String, nullable=True)
+    time_scale = Column(String, nullable=True)
+    time_start = Column(DateTime(timezone=True), nullable=True)
+    time_end = Column(DateTime(timezone=True), nullable=True)
+    diseases = Column(ARRAY(String), nullable=False, default=list)
+    pathogens = Column(ARRAY(String), nullable=False, default=list)
+    hosts = Column(ARRAY(String), nullable=False, default=list)
+    locations = Column(ARRAY(String), nullable=False, default=list)
+    model_types = Column(ARRAY(String), nullable=False, default=list)
+    term_provenance = Column(JSONB, nullable=True)
+    # True if NLM indexed the paper with MeSH (MEDLINE), so MeSH terms were
+    # available as a source in addition to PubTator and text matching
+    medline_indexed = Column(Boolean, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+    text_ref_obj = relationship("TextRef", back_populates="annotation")
+
+    def __repr__(self):
+        return f"<TextAnnotation(id='{self.id}', pmid='{self.pmid}')>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'pmid': self.pmid,
+            'abstract': self.abstract,
+            'license': self.license,
+            'time_scale': self.time_scale,
+            'time_start': self.time_start.isoformat() if self.time_start else None,
+            'time_end': self.time_end.isoformat() if self.time_end else None,
+            'diseases': self.diseases,
+            'pathogens': self.pathogens,
+            'hosts': self.hosts,
+            'locations': self.locations,
+            'model_types': self.model_types,
+            'term_provenance': self.term_provenance,
+            'medline_indexed': self.medline_indexed,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -19,6 +19,7 @@ from miradb.db.schema import (
     ODEs,
     Scenario,
     ScenarioParameter,
+    TextAnnotation,
     TextContent,
     TextRef,
 )
@@ -271,6 +272,98 @@ def list_publication_summaries(client: MiraDatabaseClient) -> list[dict]:
     )
     rows = client.query(stmt)
     return [_format_publication_summary(row) for row in rows]
+
+
+ANNOTATION_TERM_FIELDS = ("diseases", "pathogens", "hosts", "locations")
+
+# Count the distinct compartments (state variables) of each template model:
+# every concept that appears as a subject, outcome, controller or one of
+# several controllers in its templates. This matches the number of ODEs.
+_COMPARTMENT_COUNT_SQL = """
+    SELECT tr.pmid, em.extraction_method, count(DISTINCT c.name) AS n
+    FROM mira_template_models mtm
+    JOIN ode_expressions oe ON oe.id = mtm.ode_ref
+    JOIN extraction_method em ON em.id = oe.extraction_method_id
+    JOIN text_contents tc ON tc.id = oe.txt_content_ref
+    JOIN text_references tr ON tr.id = tc.text_ref
+    CROSS JOIN LATERAL jsonb_array_elements(
+        COALESCE(mtm.mira_template_model::jsonb -> 'templates', '[]'::jsonb)
+    ) AS t(tpl)
+    CROSS JOIN LATERAL (
+        SELECT tpl -> 'subject' ->> 'name'
+        UNION ALL SELECT tpl -> 'outcome' ->> 'name'
+        UNION ALL SELECT tpl -> 'controller' ->> 'name'
+        UNION ALL SELECT ctl ->> 'name'
+        FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(tpl -> 'controllers') = 'array'
+                 THEN tpl -> 'controllers' ELSE '[]'::jsonb END
+        ) AS ctl
+    ) AS c(name)
+    WHERE mtm.mira_template_model IS NOT NULL AND c.name IS NOT NULL
+    GROUP BY tr.pmid, em.extraction_method
+"""
+
+
+def _best_model_compartment_counts(client: MiraDatabaseClient) -> dict[str, int]:
+    """Return the compartment count of each paper's preferred model.
+
+    The preferred model is the one the explorer shows on a paper's card:
+    the first extraction method in EXTRACTION_METHODS_PRIORITY that has a
+    model for that paper.
+    """
+    best: dict[str, tuple[int, int]] = {}
+    for row in client.query_sql(_COMPARTMENT_COUNT_SQL):
+        rank = _priority_index(row["extraction_method"])
+        if row["pmid"] not in best or rank < best[row["pmid"]][0]:
+            best[row["pmid"]] = (rank, int(row["n"]))
+    return {pmid: n for pmid, (_, n) in best.items()}
+
+
+def list_annotation_overview(client: MiraDatabaseClient) -> list[dict]:
+    """Return per-paper annotations and model size for the explorer overview.
+
+    Covers the same publications as ``list_publication_summaries`` (those
+    with at least one converted model) and adds, per paper, the annotation
+    terms from ``text_annotations`` with their labels and the number of
+    compartments in the paper's preferred model.
+
+    Returns
+    -------
+    :
+        A list of publication summaries, each with these extra keys:
+
+        - diseases, pathogens, hosts, locations: lists of
+          ``{"id": curie, "label": str}``
+        - compartments: compartment count of the preferred model, or None
+    """
+    summaries = list_publication_summaries(client)
+    rows = client.query(
+        select(
+            TextAnnotation.pmid,
+            *(getattr(TextAnnotation, f) for f in ANNOTATION_TERM_FIELDS),
+            TextAnnotation.term_provenance,
+        )
+    )
+    annotations = {row["pmid"]: row for row in rows}
+    compartments = _best_model_compartment_counts(client)
+
+    overview = []
+    for summary in summaries:
+        ann = annotations.get(summary["pmid"])
+        provenance = (ann["term_provenance"] if ann else None) or {}
+        terms = {}
+        for field in ANNOTATION_TERM_FIELDS:
+            labels = provenance.get(field) or {}
+            terms[field] = [
+                {"id": curie, "label": (labels.get(curie) or {}).get("label") or curie}
+                for curie in ((ann[field] if ann else None) or [])
+            ]
+        overview.append({
+            **summary,
+            **terms,
+            "compartments": compartments.get(summary["pmid"]),
+        })
+    return overview
 
 
 def search_publication_summaries(
