@@ -20,13 +20,13 @@ import numpy as np
 import sympy
 
 from mira.metamodel import TemplateModel
-from mira.metamodel.template_model import Initial
 from mira.modeling import Model
 from mira.modeling.ode import OdeModel
 
 from miradb.mcp.mira_tools import (
     ensure_time,
     parse_expression,
+    set_values,
     undeclared_rate_symbols,
 )
 from miradb.mcp.model_store import ModelStore
@@ -125,7 +125,6 @@ def apply_scenario(tm: TemplateModel, scenario: dict) -> tuple[dict, dict]:
                 namespace[param["name"]] = value
 
     report = {"parameters": {}, "initials": {}, "unused": {}, "no_value": []}
-    concepts = tm.get_concepts_name_map()
     for param in params:
         name = param["name"]
         value = namespace.get(name)
@@ -136,9 +135,7 @@ def apply_scenario(tm: TemplateModel, scenario: dict) -> tuple[dict, dict]:
             tm.set_parameters({name: value})
             report["parameters"][name] = value
         elif target := _initial_target(name, compartments):
-            tm.initials[target] = Initial(
-                concept=concepts[target], expression=sympy.Float(value)
-            )
+            tm.set_initials({target: sympy.Float(value)})
             report["initials"][target] = value
         else:
             report["unused"][name] = value
@@ -190,23 +187,7 @@ def simulate(
     scenario_report, scenario_namespace = (
         apply_scenario(tm, scenario) if scenario else (None, {})
     )
-    undeclared = undeclared_rate_symbols(tm)
-    for name, value in (parameters or {}).items():
-        if name in tm.parameters or name in undeclared:
-            tm.set_parameters({name: float(value)})
-        else:
-            raise ValueError(
-                f"Unknown parameter {name!r}. Known: {sorted(tm.parameters)}."
-            )
-    concepts = tm.get_concepts_name_map()
-    for name, value in (initials or {}).items():
-        if name not in concepts:
-            raise ValueError(
-                f"Unknown compartment {name!r}. Known: {sorted(concepts)}."
-            )
-        tm.initials[name] = Initial(
-            concept=concepts[name], expression=parse_expression(value)
-        )
+    set_values(tm, parameters, initials)
 
     undeclared = undeclared_rate_symbols(tm)
     if undeclared:

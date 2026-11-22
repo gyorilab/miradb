@@ -13,7 +13,7 @@ import sympy
 
 from mira.metamodel import TemplateModel
 from mira.metamodel.ops import simplify_rate_laws, stratify
-from mira.metamodel.template_model import Initial, Time
+from mira.metamodel.template_model import Time
 from mira.modeling import Model
 from mira.modeling.amr.petrinet import template_model_to_petrinet_json
 from mira.modeling.ode import OdeModel
@@ -236,43 +236,38 @@ def simplify_model(store: ModelStore, model_ref: str) -> dict:
     return summarize_model(new_tm, new_ref)
 
 
+def set_values(
+    tm: TemplateModel,
+    parameters: dict[str, float] | None = None,
+    initials: dict[str, float | str] | None = None,
+):
+    """Set parameter values and initials of a model in place.
+
+    Initials are keyed by compartment name; values may be numbers or
+    expressions in the model's parameters (e.g. ``"N - I0"``). A parameter
+    that a rate law uses but the model never declared is added.
+    """
+    parameters = parameters or {}
+    unknown = sorted(set(parameters) - set(tm.parameters)
+                     - undeclared_rate_symbols(tm))
+    if unknown:
+        raise ValueError(f"Unknown parameters {unknown}. Known parameters: "
+                         f"{sorted(tm.parameters)}.")
+    tm.set_parameters({name: float(v) for name, v in parameters.items()})
+    tm.set_initials({name: parse_expression(v)
+                     for name, v in (initials or {}).items()})
+
+
 def set_model_values(
     store: ModelStore,
     model_ref: str,
     parameters: dict[str, float] | None = None,
     initials: dict[str, float | str] | None = None,
 ) -> dict:
-    """Return a new workspace model with parameter values and initials set.
-
-    Initials are keyed by compartment name; values may be numbers or
-    expressions in the model's parameters (e.g. ``"N - I0"``). A parameter
-    that a rate law uses but the model never declared is added.
-    """
+    """Return a new workspace model with parameter values and initials set
+    (see ``set_values``)."""
     tm = store.get(model_ref)
-    undeclared = undeclared_rate_symbols(tm)
-    unknown_params = []
-    for name, value in (parameters or {}).items():
-        if name in tm.parameters or name in undeclared:
-            tm.set_parameters({name: float(value)})
-        else:
-            unknown_params.append(name)
-
-    concepts = tm.get_concepts_name_map()
-    unknown_initials = []
-    for name, value in (initials or {}).items():
-        if name not in concepts:
-            unknown_initials.append(name)
-            continue
-        tm.initials[name] = Initial(
-            concept=concepts[name], expression=parse_expression(value)
-        )
-
-    if unknown_params or unknown_initials:
-        raise ValueError(
-            f"Unknown parameters {unknown_params} or compartments "
-            f"{unknown_initials}. Known parameters: {sorted(tm.parameters)}; "
-            f"known compartments: {sorted(concepts)}."
-        )
+    set_values(tm, parameters, initials)
     new_ref = store.add(tm, parent=model_ref, operation="set_values")
     return summarize_model(tm, new_ref)
 
