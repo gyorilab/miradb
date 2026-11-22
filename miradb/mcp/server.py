@@ -31,7 +31,7 @@ from starlette.responses import HTMLResponse, JSONResponse
 from miradb.db.client import MiraDatabaseClient, get_client
 from miradb.mcp import compare, db_tools, docs, mira_tools, model_edit, simulate as sim
 from miradb.mcp.model_store import ModelStore
-from miradb.mcp.refinement import dkg_closure
+from miradb.mcp.refinement import prefetch_dkg_closure
 
 logger = logging.getLogger(__name__)
 
@@ -843,7 +843,7 @@ def main(transport, host, port, db_label):
     mcp.settings.host = host
     mcp.settings.port = port
     # Comparisons default to DKG refinement; load the ontology up front
-    dkg_closure.prefetch()
+    prefetch_dkg_closure()
     mcp.run(transport=transport)
 
 
