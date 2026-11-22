@@ -27,20 +27,9 @@ from mira.metamodel.template_model import (
     Parameter,
     Time,
 )
-from mira.metamodel.templates import (
-    Concept,
-    ControlledConversion,
-    ControlledDegradation,
-    ControlledProduction,
-    GroupedControlledConversion,
-    GroupedControlledDegradation,
-    GroupedControlledProduction,
-    NaturalConversion,
-    NaturalDegradation,
-    NaturalProduction,
-    StaticConcept,
-)
+from mira.metamodel.templates import Concept, StaticConcept
 from mira.metamodel.units import Unit
+from mira.sources.util import transition_to_templates
 
 from miradb.mcp.mira_tools import (
     _template_concepts,
@@ -58,19 +47,6 @@ ANNOTATION_LIST_FIELDS = (
     "references", "locations", "pathogens", "diseases", "hosts", "model_types",
 )
 ANNOTATION_TEXT_FIELDS = ("name", "description", "license", "time_scale")
-
-# (has subject, has outcome, number of controllers) -> template class
-_TEMPLATE_CLASSES = {
-    (True, True, 0): NaturalConversion,
-    (True, True, 1): ControlledConversion,
-    (True, True, 2): GroupedControlledConversion,
-    (False, True, 0): NaturalProduction,
-    (False, True, 1): ControlledProduction,
-    (False, True, 2): GroupedControlledProduction,
-    (True, False, 0): NaturalDegradation,
-    (True, False, 1): ControlledDegradation,
-    (True, False, 2): GroupedControlledDegradation,
-}
 
 
 # ---------------------------------------------------------------------------
@@ -283,21 +259,15 @@ def remove_state(store: ModelStore, model_ref: str, name: str) -> dict:
     symbol is replaced by 0 in observables."""
     tm = store.get(model_ref)
     _require_state(tm, name)
-    removed, kept = [], []
-    for index, template in enumerate(tm.templates):
-        if any(c.name == name for c in _template_concepts(template)):
-            removed.append(describe_template(template, index))
-        else:
-            kept.append(template)
-    tm.templates = kept
+    removed = [describe_template(template, index)
+               for index, template in enumerate(tm.templates)
+               if name in template.get_concept_names()]
+    changed_observables = [
+        obs_name for obs_name, obs in tm.observables.items()
+        if sympy.Symbol(name) in obs.expression.free_symbols
+    ]
+    tm.remove_concept(name)
     tm.initials.pop(name, None)
-    zero = {sympy.Symbol(name): sympy.Integer(0)}
-    changed_observables = []
-    for obs_name, obs in tm.observables.items():
-        expr = sympy.sympify(obs.expression)
-        if sympy.Symbol(name) in expr.free_symbols:
-            obs.expression = expr.xreplace(zero)
-            changed_observables.append(obs_name)
     return _commit(store, tm, model_ref, f"remove_state({name!r})", {
         "removed_state": name,
         "removed_transitions": removed,
@@ -340,12 +310,8 @@ def update_state(
             concept.context = dict(context)
         if new_units is not None:
             concept.units = new_units
-        if new_name and new_name != name:
-            concept.name = new_name
     if new_name and new_name != name:
-        _rename_symbol(tm, name, new_name)
-        if name in tm.initials:
-            tm.initials[new_name] = tm.initials.pop(name)
+        tm.rename_concept(name, new_name)
         changed["name"] = new_name
     if not changed:
         raise ValueError("Nothing to change: pass at least one attribute.")
@@ -464,10 +430,7 @@ def update_parameter(
         changed["description"] = description
     if new_name and new_name != name:
         _require_new_symbol(tm, new_name)
-        _rename_symbol(tm, name, new_name)
-        param.name = new_name
-        tm.parameters = {(new_name if k == name else k): v
-                         for k, v in tm.parameters.items()}
+        tm.rename_parameter(name, new_name)
         changed["name"] = new_name
     if not changed:
         raise ValueError("Nothing to change: pass at least one attribute.")
@@ -493,8 +456,7 @@ def merge_duplicate_parameters(
     _require_parameter(tm, keep)
     if redundant == keep:
         raise ValueError("redundant and keep must differ.")
-    _rename_symbol(tm, redundant, keep)
-    tm.parameters.pop(redundant)
+    tm.substitute_parameter(redundant, sympy.Symbol(keep))
     return _commit(store, tm, model_ref,
                    f"merge_duplicate_parameters({redundant!r} -> {keep!r})",
                    {"removed_parameter": redundant, "replaced_by": keep})
@@ -564,23 +526,15 @@ def add_transition(
     if name and any(t.name == name for t in tm.templates):
         raise ValueError(f"A transition named {name!r} already exists.")
 
-    concepts = tm.get_concepts_name_map()
-    key = (bool(subject), bool(outcome), min(len(controllers), 2))
-    cls = _TEMPLATE_CLASSES[key]
-    kwargs = {"name": name}
-    if subject:
-        kwargs["subject"] = copy.deepcopy(concepts[subject])
-    if outcome:
-        kwargs["outcome"] = copy.deepcopy(concepts[outcome])
-    if len(controllers) == 1:
-        kwargs["controller"] = copy.deepcopy(concepts[controllers[0]])
-    elif controllers:
-        kwargs["controllers"] = [copy.deepcopy(concepts[c]) for c in controllers]
-    template = cls(**kwargs)
-
-    if rate_law:
-        template.rate_law = parse_expression(rate_law)
-    else:
+    concepts = copy.deepcopy(tm.get_concepts_name_map())
+    template = next(transition_to_templates(
+        [concepts[subject]] if subject else [],
+        [concepts[outcome]] if outcome else [],
+        [concepts[c] for c in controllers],
+        parse_expression(rate_law) if rate_law else None,
+        name,
+    ))
+    if not rate_law:
         param = mass_action_parameter or f"k_{name or f't{len(tm.templates) + 1}'}"
         template.set_mass_action_rate_law(param)
     with_value, without_value = _define_rate_law_symbols(
@@ -593,8 +547,8 @@ def add_transition(
         changes["added_parameters"] = with_value
     if without_value:
         changes["added_parameters_without_value"] = without_value
-    return _commit(store, tm, model_ref, f"add_transition({cls.__name__})",
-                   changes)
+    return _commit(store, tm, model_ref,
+                   f"add_transition({type(template).__name__})", changes)
 
 
 def remove_transition(store: ModelStore, model_ref: str, transition: str) -> dict:
