@@ -763,7 +763,7 @@ async def simulate_model(
                     "numbers or expressions in parameters.")] = None,
     t_start: float = 0.0,
     n_points: Annotated[int, Field(ge=2, le=sim.MAX_POINTS)] = 101,
-    method: Literal["LSODA", "RK45", "BDF", "Radau", "DOP853"] = "LSODA",
+    method: Literal["lsoda", "vode", "dopri5", "dop853"] = "lsoda",
 ) -> dict:
     """Simulate a model's ODEs deterministically.
 

@@ -1,9 +1,6 @@
 """Deterministic ODE simulation of TemplateModels for the MCP server.
 
-MIRA's ``OdeModel`` builds the right-hand side; integration uses
-``scipy.integrate.solve_ivp`` so solver failures, time-dependent rate laws
-and runaway stiff systems are reported instead of silently returning
-garbage.
+MIRA's ``OdeModel`` builds and integrates the ODEs.
 
 Values are resolved in increasing order of precedence: values stored in the
 model, a scenario from the database, then explicit overrides. Scenarios
@@ -16,12 +13,10 @@ import io
 import logging
 import math
 import threading
-import time
 import uuid
 from collections import OrderedDict
 
 import numpy as np
-import scipy.integrate
 import sympy
 
 from mira.metamodel import TemplateModel
@@ -39,14 +34,9 @@ from miradb.mcp.model_store import ModelStore
 logger = logging.getLogger(__name__)
 
 MAX_POINTS = 5000
-DEFAULT_TIMEOUT_S = 30.0
+TIMEOUT_S = 30
 PREVIEW_POINTS = 11
-SOLVER_METHODS = ("LSODA", "RK45", "BDF", "Radau", "DOP853")
 INITIAL_SUFFIXES = ("_0", "0", "(0)", "_init", "_initial")
-
-
-class SimulationTimeout(RuntimeError):
-    pass
 
 
 class SimulationStore:
@@ -183,8 +173,7 @@ def simulate(
     parameters: dict[str, float] | None = None,
     initials: dict[str, float | str] | None = None,
     scenario: dict | None = None,
-    method: str = "LSODA",
-    timeout_s: float = DEFAULT_TIMEOUT_S,
+    method: str = "lsoda",
 ) -> dict:
     """Simulate a model and return a summary of the trajectories.
 
@@ -194,8 +183,6 @@ def simulate(
     """
     if t_end <= t_start:
         raise ValueError("t_end must be greater than t_start.")
-    if method not in SOLVER_METHODS:
-        raise ValueError(f"Unknown method {method!r}; choose from {SOLVER_METHODS}.")
     n_points = max(2, min(int(n_points), MAX_POINTS))
     ref = store.normalize_ref(model_ref)
     tm = ensure_time(store.get(ref))
@@ -284,48 +271,22 @@ def simulate(
             "scenario_applied": scenario_report,
         }
 
-    t_sym = sympy.Symbol("t")
-    p_subs = {om.p[idx]: param_values[key] for key, idx in om.pmap.items()}
-    kinetics = om.kinetics.xreplace(p_subs)
-    observables = om.observables.xreplace(p_subs)
-    rhs_fn = sympy.lambdify([t_sym, om.y], kinetics, modules="numpy")
-    deadline = time.monotonic() + timeout_s
-
-    def rhs(t, y):
-        if time.monotonic() > deadline:
-            raise SimulationTimeout(f"Simulation exceeded {timeout_s} s.")
-        return np.asarray(rhs_fn(t, y.reshape(-1, 1)), dtype=float).reshape(-1)
-
     times = np.linspace(t_start, t_end, n_points)
     try:
-        sol = scipy.integrate.solve_ivp(
-            rhs, (t_start, t_end), y0, t_eval=times, method=method,
-            rtol=1e-6, atol=1e-6,
-        )
-    except SimulationTimeout as err:
-        return {"status": "solver_failed", "model_ref": ref, "message": str(err),
-                "hint": "Try a shorter t_end or method='BDF' for stiff models."}
-
-    if not sol.success or sol.y.shape[1] != n_points:
+        values = om.simulate_model(times, y0, param_values,
+                                   with_observables=True, integrator=method,
+                                   timeout=TIMEOUT_S)
+    except (RuntimeError, TimeoutError) as err:
         return {"status": "solver_failed", "model_ref": ref,
-                "message": sol.message,
-                "hint": "Try method='BDF' or 'Radau' for stiff models, or "
-                        "check parameter magnitudes."}
-
-    columns = [om.vname_map[i] for i in range(len(om.vmap))]
-    values = sol.y.T
-    if observables.shape[0]:
-        obs_fn = sympy.lambdify([t_sym, om.y], observables, modules="numpy")
-        obs_values = np.array([
-            np.asarray(obs_fn(t, row.reshape(-1, 1)), dtype=float).reshape(-1)
-            for t, row in zip(sol.t, values)
-        ])
-        columns += list(om.observable_map)
-        values = np.hstack([values, obs_values])
+                "message": str(err),
+                "hint": "Try a shorter t_end, another method, or check "
+                        "parameter magnitudes."}
+    columns = [om.vname_map[i] for i in range(len(om.vmap))] + \
+        list(om.observable_map)
 
     sim_id = sims.add({
         "model_ref": ref,
-        "times": sol.t,
+        "times": times,
         "columns": columns,
         "values": values,
         "n_variables": len(om.vmap),
@@ -340,7 +301,7 @@ def simulate(
     if negatives:
         warnings.append(f"Negative values in {negatives}; check parameters "
                         "and rate laws.")
-    preview_idx = _downsample_indices(len(sol.t), PREVIEW_POINTS)
+    preview_idx = _downsample_indices(len(times), PREVIEW_POINTS)
     return {
         "status": "ok",
         "sim_id": sim_id,
@@ -349,7 +310,7 @@ def simulate(
         "initials_used": {c: float(y0[i]) for i, c in enumerate(columns[:n_vars])},
         "scenario_applied": scenario_report,
         "stats": {
-            c: _column_stats(sol.t, values[:, i]) for i, c in enumerate(columns)
+            c: _column_stats(times, values[:, i]) for i, c in enumerate(columns)
         },
         "total_of_compartments": {
             "initial": float(total[0]),
@@ -357,7 +318,7 @@ def simulate(
             "relative_change": float((total[-1] - total[0]) / scale),
         },
         "preview": {
-            "t": [float(t) for t in sol.t[preview_idx]],
+            "t": [float(t) for t in times[preview_idx]],
             **{c: [float(v) for v in values[preview_idx, i]]
                for i, c in enumerate(columns)},
         },
