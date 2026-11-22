@@ -14,6 +14,7 @@ import sympy
 from mira.metamodel import TemplateModel
 from mira.metamodel.ops import simplify_rate_laws, stratify
 from mira.metamodel.template_model import Time
+from mira.metamodel.utils import safe_parse_expr
 from mira.modeling import Model
 from mira.modeling.amr.petrinet import template_model_to_petrinet_json
 from mira.modeling.ode import OdeModel
@@ -49,21 +50,27 @@ def ensure_time(tm: TemplateModel) -> TemplateModel:
     return tm
 
 
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-
-def parse_expression(value) -> sympy.Expr:
+def parse_expression(value, tm: TemplateModel | None = None) -> sympy.Expr:
     """Parse a number or expression string into a SymPy expression.
 
-    Every identifier is a plain symbol, so names such as ``N``, ``I``,
-    ``E``, ``S``, ``beta`` or ``gamma`` are not mistaken for SymPy's
-    built-in functions and constants.
+    The names of the model's concepts, parameters and time variable are
+    parsed as symbols, not as SymPy built-ins such as ``N`` or ``beta``.
     """
     if isinstance(value, (int, float)):
         return sympy.Float(value)
-    value = str(value)
-    names = {name: sympy.Symbol(name) for name in _IDENTIFIER.findall(value)}
-    return sympy.sympify(value, locals=names)
+    names = set()
+    if tm is not None:
+        names = set(tm.get_concepts_name_map()) | set(tm.parameters)
+        if tm.time:
+            names.add(tm.time.name)
+    try:
+        return safe_parse_expr(str(value),
+                               {name: sympy.Symbol(name) for name in names})
+    except (sympy.SympifyError, TypeError, SyntaxError) as err:
+        raise ValueError(
+            f"Could not parse {value!r} ({err}). Add new parameters with "
+            "mira_add_parameter before using them in an expression."
+        ) from err
 
 
 def undeclared_rate_symbols(tm: TemplateModel) -> set[str]:
@@ -254,7 +261,7 @@ def set_values(
         raise ValueError(f"Unknown parameters {unknown}. Known parameters: "
                          f"{sorted(tm.parameters)}.")
     tm.set_parameters({name: float(v) for name, v in parameters.items()})
-    tm.set_initials({name: parse_expression(v)
+    tm.set_initials({name: parse_expression(v, tm)
                      for name, v in (initials or {}).items()})
 
 

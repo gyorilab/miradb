@@ -246,7 +246,7 @@ def add_state(
     tm.templates.append(StaticConcept(subject=concept))
     if initial is not None:
         tm.initials[name] = Initial(concept=copy.deepcopy(concept),
-                                    expression=parse_expression(initial))
+                                    expression=parse_expression(initial, tm))
     return _commit(store, tm, model_ref, f"add_state({name!r})", {
         "added_state": name,
         "initial": str(initial) if initial is not None else None,
@@ -332,7 +332,7 @@ def set_initial(
     concept = copy.deepcopy(tm.get_concepts_name_map()[state])
     previous = tm.initials.get(state)
     tm.initials[state] = Initial(concept=concept,
-                                 expression=parse_expression(expression))
+                                 expression=parse_expression(expression, tm))
     return _commit(store, tm, model_ref, f"set_initial({state!r})", {
         "state": state,
         "initial": str(tm.initials[state].expression),
@@ -531,7 +531,7 @@ def add_transition(
         [concepts[subject]] if subject else [],
         [concepts[outcome]] if outcome else [],
         [concepts[c] for c in controllers],
-        parse_expression(rate_law) if rate_law else None,
+        parse_expression(rate_law, tm) if rate_law else None,
         name,
     ))
     if not rate_law:
@@ -589,7 +589,7 @@ def update_transition(
         changed["display_name"] = display_name
     if rate_law:
         changed["previous_rate_law"] = str(template.rate_law)
-        template.rate_law = parse_expression(rate_law)
+        template.rate_law = parse_expression(rate_law, tm)
         changed["rate_law"] = str(template.rate_law)
         with_value, without_value = _define_rate_law_symbols(
             tm, template.rate_law, parameters
@@ -621,7 +621,7 @@ def add_observable(
     tm = store.get(model_ref)
     _require_new_symbol(tm, name)
     tm.observables[name] = Observable(
-        name=name, expression=parse_expression(expression),
+        name=name, expression=parse_expression(expression, tm),
         display_name=display_name, description=description,
     )
     return _commit(store, tm, model_ref, f"add_observable({name!r})", {
@@ -654,7 +654,7 @@ def update_observable(
     changed = {}
     if expression is not None:
         changed["previous_expression"] = str(obs.expression)
-        obs.expression = parse_expression(expression)
+        obs.expression = parse_expression(expression, tm)
         changed["expression"] = str(obs.expression)
     if display_name is not None:
         obs.display_name = display_name

@@ -21,11 +21,11 @@ import sympy
 
 from mira.metamodel import TemplateModel
 from mira.modeling import Model
+from mira.metamodel.utils import safe_parse_expr
 from mira.modeling.ode import OdeModel
 
 from miradb.mcp.mira_tools import (
     ensure_time,
-    parse_expression,
     set_values,
     undeclared_rate_symbols,
 )
@@ -78,8 +78,7 @@ def _scenario_value(param: dict, namespace: dict) -> float | None:
     if not expression:
         return None
     try:
-        value = parse_expression(expression).subs(_symbol_keys(namespace))
-        return float(value)
+        return float(safe_parse_expr(expression, namespace))
     except (sympy.SympifyError, TypeError, ValueError, SyntaxError):
         return None
 
