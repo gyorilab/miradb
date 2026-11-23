@@ -131,8 +131,8 @@ def compartment_jaccard(
         "jaccard": score,
         "compartment_mismatch": score < mismatch_threshold,
         "shared": sorted(intersection),
-        "only_in_1": r1_only,
-        "only_in_2": r2_only,
+        "only_in_1": sorted(roles1 - set(rhs2_aligned)),
+        "only_in_2": sorted(roles2 - roles1 - set(subs)),
         "rhs2_aligned": rhs2_aligned,
     }
 
