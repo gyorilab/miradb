@@ -155,64 +155,57 @@ def model_delta(
 ) -> dict:
     """Describe what differs between two models, as text.
 
-    Uses the same equality and refinement checks as ``TemplateModelDelta``,
-    which ``draw_model_delta`` renders as a graph.
+    Uses the equality and refinement relations computed by
+    ``TemplateModelComparison``.
     """
     ref1, ref2 = store.normalize_ref(model_ref_1), store.normalize_ref(model_ref_2)
-    tm1, tm2 = store.get(ref1), store.get(ref2)
+    tms = [store.get(ref1), store.get(ref2)]
     func, mode, warning = get_refinement_func(refinement)
+    comparison = TemplateModelComparison(tms, refinement_func=func)
+    templates = comparison.template_node_lookup
+    concepts = comparison.concept_node_lookup
 
-    def relate(a, b):
-        if a.is_equal_to(b, with_context=True):
-            return "is_equal"
-        if a.refinement_of(b, refinement_func=func, with_context=True):
-            return "refinement_of"
-        if b.refinement_of(a, refinement_func=func, with_context=True):
-            return "refined_by"
-        return None
+    def describe(node):
+        template = templates[node]
+        return describe_template(template,
+                                 tms[node[0]].templates.index(template))
 
-    concepts1 = list(tm1.get_concepts_map().values())
-    concepts2 = list(tm2.get_concepts_map().values())
-    concept_matches, matched1, matched2 = [], set(), set()
-    for i, c1 in enumerate(concepts1):
-        for j, c2 in enumerate(concepts2):
-            if relation := relate(c1, c2):
-                concept_matches.append({"model_1": c1.name, "model_2": c2.name,
+    matches = {"concepts": [], "transitions": []}
+    matched = set()
+    # An edge (a, b, "refinement_of") means that a is a refinement of b
+    for node_a, node_b, relation in comparison.inter_model_edges:
+        if node_a[0] == 1:
+            node_a, node_b = node_b, node_a
+            if relation == "refinement_of":
+                relation = "refined_by"
+        if node_a in templates:
+            matches["transitions"].append({"model_1": describe(node_a),
+                                           "model_2": describe(node_b),
+                                           "relation": relation})
+        else:
+            matches["concepts"].append({"model_1": concepts[node_a].name,
+                                        "model_2": concepts[node_b].name,
                                         "relation": relation})
-                matched1.add(i)
-                matched2.add(j)
+        matched |= {node_a, node_b}
+
     result = {
         "model_refs": [ref1, ref2],
         "refinement": mode,
         "concepts": {
-            "matched": concept_matches,
-            "only_in_model_1": [_concept_summary(c) for i, c in enumerate(concepts1)
-                                if i not in matched1],
-            "only_in_model_2": [_concept_summary(c) for j, c in enumerate(concepts2)
-                                if j not in matched2],
+            "matched": matches["concepts"],
+            "only_in_model_1": [_concept_summary(c) for n, c in concepts.items()
+                                if n[0] == 0 and n not in matched],
+            "only_in_model_2": [_concept_summary(c) for n, c in concepts.items()
+                                if n[0] == 1 and n not in matched],
         },
     }
-
     if not concepts_only:
-        template_matches, matched1, matched2 = [], set(), set()
-        for i, t1 in enumerate(tm1.templates):
-            for j, t2 in enumerate(tm2.templates):
-                if relation := relate(t1, t2):
-                    template_matches.append({
-                        "model_1": describe_template(t1, i),
-                        "model_2": describe_template(t2, j),
-                        "relation": relation,
-                    })
-                    matched1.add(i)
-                    matched2.add(j)
         result["transitions"] = {
-            "matched": template_matches,
-            "only_in_model_1": [describe_template(t, i)
-                                for i, t in enumerate(tm1.templates)
-                                if i not in matched1],
-            "only_in_model_2": [describe_template(t, j)
-                                for j, t in enumerate(tm2.templates)
-                                if j not in matched2],
+            "matched": matches["transitions"],
+            "only_in_model_1": [describe(n) for n in templates
+                                if n[0] == 0 and n not in matched],
+            "only_in_model_2": [describe(n) for n in templates
+                                if n[0] == 1 and n not in matched],
             "note": "Transitions match on type and concepts; rate laws are "
                     "not compared.",
         }
