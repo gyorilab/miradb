@@ -174,7 +174,7 @@ def simulate(
     """Simulate a model and return a summary of the trajectories.
 
     Returns a dict whose ``status`` is ``ok``, ``missing_values`` (nothing
-    was simulated; the dict says which values to supply) or
+    was simulated and the dict says which values to supply) or
     ``solver_failed``.
     """
     if t_end <= t_start:
@@ -279,7 +279,7 @@ def simulate(
     negatives = [c for i, c in enumerate(columns[:n_vars])
                  if values[:, i].min() < -1e-6 * scale]
     if negatives:
-        warnings.append(f"Negative values in {negatives}; check parameters "
+        warnings.append(f"Negative values in {negatives}. Check parameters "
                         "and rate laws.")
     preview_idx = _downsample_indices(len(times), PREVIEW_POINTS)
     return {
@@ -287,10 +287,12 @@ def simulate(
         "sim_id": sim_id,
         "model_ref": ref,
         "parameters_used": param_values,
-        "initials_used": {c: float(y0[i]) for i, c in enumerate(columns[:n_vars])},
+        "initials_used": {c: float(y0[i])
+                          for i, c in enumerate(columns[:n_vars])},
         "scenario_applied": scenario_report,
         "stats": {
-            c: _column_stats(times, values[:, i]) for i, c in enumerate(columns)
+            c: _column_stats(times, values[:, i])
+            for i, c in enumerate(columns)
         },
         "total_of_compartments": {
             "initial": float(total[0]),
@@ -319,7 +321,8 @@ def get_trajectory(
     selected = variables or columns
     unknown = [v for v in selected if v not in columns]
     if unknown:
-        raise ValueError(f"Unknown columns {unknown}; available: {columns}.")
+        raise ValueError(f"Unknown columns {unknown}. Available: "
+                         f"{columns}.")
     idx = _downsample_indices(len(result["times"]), max(2, int(n_points)))
     return {
         "sim_id": sim_id,

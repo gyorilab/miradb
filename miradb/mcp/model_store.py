@@ -45,7 +45,7 @@ class ModelStore:
         models. Called lazily so the store can be created before the
         database is reachable.
     max_workspace_models :
-        Maximum number of workspace models kept; the oldest are evicted
+        Maximum number of workspace models kept. The oldest are evicted
         first. Default: 500.
     max_cached_db_models :
         Maximum number of database model JSONs cached. Default: 200.
@@ -157,7 +157,8 @@ class ModelStore:
                 if entry is None:
                     chain.append({"model_ref": ref, "operation": None})
                     break
-                chain.append({"model_ref": ref, "operation": entry["operation"]})
+                chain.append({"model_ref": ref,
+                              "operation": entry["operation"]})
                 ref = entry["parent"]
         return chain
 

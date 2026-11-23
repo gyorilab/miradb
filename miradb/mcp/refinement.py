@@ -46,7 +46,7 @@ def get_refinement_func(
         default_dkg_refinement_closure.initialize()
     except Exception as err:
         return _exact, "exact", (
-            f"DKG unavailable ({type(err).__name__}: {err}); compared by "
+            f"DKG unavailable ({type(err).__name__}: {err}). Compared by "
             "exact grounding only."
         )
     return default_dkg_refinement_closure.is_ontological_child, "dkg", None

@@ -60,7 +60,8 @@ def compare_models(
     for score in graph_data.get_similarity_scores():
         i, j = score["models"]
         scores.append({"models": [refs[i], refs[j]], "score": score["score"]})
-    result = {"model_refs": refs, "refinement": mode, "similarity_scores": scores}
+    result = {"model_refs": refs, "refinement": mode,
+              "similarity_scores": scores}
     if include_graph:
         # Model indices in the graph follow the order of model_refs
         result["graph"] = graph_data.to_json()
@@ -75,7 +76,8 @@ def _concept_label(concept, name_only: bool) -> str:
     if concept.get_curie():
         name += f" ({':'.join(concept.get_curie())})"
     if concept.context:
-        name += " [" + ", ".join(f"{k}: {v}" for k, v in concept.context.items()) + "]"
+        name += " [" + ", ".join(f"{k}: {v}" for k, v
+                                 in concept.context.items()) + "]"
     return name
 
 
@@ -88,7 +90,8 @@ def compare_concepts(
 ) -> dict:
     """Relate every concept of one model to every concept of another
     (``get_concept_comparison_table``)."""
-    ref1, ref2 = store.normalize_ref(model_ref_1), store.normalize_ref(model_ref_2)
+    ref1, ref2 = (store.normalize_ref(model_ref_1),
+                  store.normalize_ref(model_ref_2))
     tm1, tm2 = store.get(ref1), store.get(ref2)
     func, mode, warning = get_refinement_func(refinement)
     table = get_concept_comparison_table(
@@ -110,8 +113,10 @@ def compare_concepts(
     # The table only has rows/columns for concepts that matched something
     matched_1 = {r["model_1_concept"] for r in relations}
     matched_2 = {r["model_2_concept"] for r in relations}
-    labels_1 = {_concept_label(c, name_only) for c in tm1.get_concepts_map().values()}
-    labels_2 = {_concept_label(c, name_only) for c in tm2.get_concepts_map().values()}
+    labels_1 = {_concept_label(c, name_only)
+                for c in tm1.get_concepts_map().values()}
+    labels_2 = {_concept_label(c, name_only)
+                for c in tm2.get_concepts_map().values()}
     result = {
         "model_refs": [ref1, ref2],
         "refinement": mode,
@@ -119,7 +124,7 @@ def compare_concepts(
         "unmatched_in_model_1": sorted(labels_1 - matched_1),
         "unmatched_in_model_2": sorted(labels_2 - matched_2),
         "note": "refinement_of means the model 1 concept is a more specific "
-                "version of the model 2 concept; refined_by the reverse.",
+                "version of the model 2 concept, refined_by the reverse.",
     }
     return _with_warning(result, warning)
 
@@ -158,7 +163,8 @@ def model_delta(
     Uses the equality and refinement relations computed by
     ``TemplateModelComparison``.
     """
-    ref1, ref2 = store.normalize_ref(model_ref_1), store.normalize_ref(model_ref_2)
+    ref1, ref2 = (store.normalize_ref(model_ref_1),
+                  store.normalize_ref(model_ref_2))
     tms = [store.get(ref1), store.get(ref2)]
     func, mode, warning = get_refinement_func(refinement)
     comparison = TemplateModelComparison(tms, refinement_func=func)
@@ -193,9 +199,11 @@ def model_delta(
         "refinement": mode,
         "concepts": {
             "matched": matches["concepts"],
-            "only_in_model_1": [_concept_summary(c) for n, c in concepts.items()
+            "only_in_model_1": [_concept_summary(c)
+                                for n, c in concepts.items()
                                 if n[0] == 0 and n not in matched],
-            "only_in_model_2": [_concept_summary(c) for n, c in concepts.items()
+            "only_in_model_2": [_concept_summary(c)
+                                for n, c in concepts.items()
                                 if n[0] == 1 and n not in matched],
         },
     }
@@ -206,7 +214,7 @@ def model_delta(
                                 if n[0] == 0 and n not in matched],
             "only_in_model_2": [describe(n) for n in templates
                                 if n[0] == 1 and n not in matched],
-            "note": "Transitions match on type and concepts; rate laws are "
+            "note": "Transitions match on type and concepts. Rate laws are "
                     "not compared.",
         }
     return _with_warning(result, warning)
@@ -214,7 +222,8 @@ def model_delta(
 
 def _image_path(stem: str, fmt: str) -> Path:
     if fmt not in IMAGE_FORMATS:
-        raise ValueError(f"Unknown format {fmt!r}; choose from {IMAGE_FORMATS}.")
+        raise ValueError(f"Unknown format {fmt!r}. Choose from "
+                         f"{IMAGE_FORMATS}.")
     IMAGE_DIR.mkdir(exist_ok=True)
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", stem)
     return IMAGE_DIR / f"{stem}_{uuid.uuid4().hex[:6]}.{fmt}"
@@ -228,7 +237,7 @@ def image_result(path: Path, info: dict) -> tuple[bytes | None, dict]:
         return None, info
     data = path.read_bytes()
     if len(data) > MAX_INLINE_IMAGE_BYTES:
-        info["note"] = "Image too large to show inline; open image_path."
+        info["note"] = "Image too large to show inline. Open image_path."
         return None, info
     return data, info
 
@@ -256,7 +265,8 @@ def draw_model_delta(
     fmt: str = "png",
 ) -> tuple[bytes | None, dict]:
     """Render the difference of two models (``TemplateModelDelta``)."""
-    ref1, ref2 = store.normalize_ref(model_ref_1), store.normalize_ref(model_ref_2)
+    ref1, ref2 = (store.normalize_ref(model_ref_1),
+                  store.normalize_ref(model_ref_2))
     func, mode, warning = get_refinement_func(refinement)
     delta = TemplateModelDelta(
         store.get(ref1), store.get(ref2), refinement_function=func,

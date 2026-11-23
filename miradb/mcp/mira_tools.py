@@ -1,7 +1,7 @@
 """MIRA model operations for the MCP server.
 
 Every operation takes model handles (see ``miradb.mcp.model_store``) and
-returns compact summaries; operations that produce a new model store it in
+returns compact summaries. Operations that produce a new model store it in
 the workspace and return its new handle.
 """
 
@@ -74,7 +74,7 @@ def undeclared_rate_symbols(tm: TemplateModel) -> set[str]:
     parameters nor the time variable.
 
     Extracted models occasionally reference a constant (e.g. ``N``) that
-    was never declared as a parameter; MIRA cannot build ODEs for them
+    was never declared as a parameter. MIRA cannot build ODEs for them
     until it is.
     """
     known = set(tm.get_concepts_name_map()) | set(tm.parameters)
@@ -97,7 +97,7 @@ def find_transition(tm: TemplateModel, transition: str) -> int:
         return named[0]
     if len(named) > 1:
         raise ValueError(
-            f"{len(named)} transitions are named {transition!r}; refer to "
+            f"{len(named)} transitions are named {transition!r}. Refer to "
             f"one by position instead, e.g. 't{named[0] + 1}'."
         )
     match = re.fullmatch(r"t(\d+)", transition)
@@ -129,7 +129,8 @@ def summarize_model(tm: TemplateModel, model_ref: str | None = None) -> dict:
                 "name": template.name,
                 "type": template.type,
                 "concepts": [c.name for c in template.get_concepts_flat()],
-                "rate_law": str(template.rate_law) if template.rate_law else None,
+                "rate_law": str(template.rate_law) if template.rate_law
+                else None,
             }
         )
     parameters = {
@@ -142,12 +143,14 @@ def summarize_model(tm: TemplateModel, model_ref: str | None = None) -> dict:
         for name, p in (tm.parameters or {}).items()
     }
     initials = {
-        name: str(init.expression) for name, init in (tm.initials or {}).items()
+        name: str(init.expression)
+        for name, init in (tm.initials or {}).items()
     }
     summary = {
         "compartments": list(concepts.values()),
         "transitions": transitions,
-        "transition_type_counts": dict(Counter(t["type"] for t in transitions)),
+        "transition_type_counts": dict(Counter(t["type"]
+                                               for t in transitions)),
         "parameters": parameters,
         "parameters_without_value": sorted(
             n for n, p in parameters.items() if p["value"] is None
@@ -225,14 +228,16 @@ def stratify_model(
         params_to_preserve=params_to_preserve,
     )
     new_ref = store.add(
-        new_tm, parent=model_ref, operation=f"stratify(key={key!r}, strata={strata})"
+        new_tm, parent=model_ref,
+        operation=f"stratify(key={key!r}, strata={strata})"
     )
     return summarize_model(new_tm, new_ref)
 
 
 def simplify_model(store: ModelStore, model_ref: str) -> dict:
     new_tm = simplify_rate_laws(store.get(model_ref))
-    new_ref = store.add(new_tm, parent=model_ref, operation="simplify_rate_laws")
+    new_ref = store.add(new_tm, parent=model_ref,
+                        operation="simplify_rate_laws")
     return summarize_model(new_tm, new_ref)
 
 
@@ -243,7 +248,7 @@ def set_values(
 ):
     """Set parameter values and initials of a model in place.
 
-    Initials are keyed by compartment name; values may be numbers or
+    Initials are keyed by compartment name. Values may be numbers or
     expressions in the model's parameters (e.g. ``"N - I0"``). A parameter
     that a rate law uses but the model never declared is added.
     """
@@ -272,10 +277,12 @@ def set_model_values(
     return summarize_model(tm, new_ref)
 
 
-def export_model(store: ModelStore, model_ref: str, fmt: str = "template_model") -> dict:
+def export_model(store: ModelStore, model_ref: str,
+                 fmt: str = "template_model") -> dict:
     """Return a model's full JSON as a TemplateModel or ASKEM Petri net AMR."""
     if fmt not in EXPORT_FORMATS:
-        raise ValueError(f"Unknown format {fmt!r}; choose one of {EXPORT_FORMATS}.")
+        raise ValueError(f"Unknown format {fmt!r}. Choose one of "
+                         f"{EXPORT_FORMATS}.")
     if fmt == "template_model":
         return store.get_json(model_ref)
     return template_model_to_petrinet_json(store.get(model_ref))

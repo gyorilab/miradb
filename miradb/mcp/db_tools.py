@@ -1,6 +1,6 @@
 """Read-only MIRA-DB access for the MCP server.
 
-Curated lookups wrap the functions in ``miradb.db.queries``; ``run_sql`` is
+Curated lookups wrap the functions in ``miradb.db.queries``. ``run_sql`` is
 an escape hatch for anything they do not cover. ``run_sql`` runs inside a
 ``READ ONLY`` transaction with a statement timeout, so even a statement that
 slips past the syntax check cannot modify the database. For defense in depth,
@@ -60,7 +60,7 @@ that model's parameters.
   template has type (e.g. ControlledConversion), rate_law, and concepts
   (subject/outcome/controller) with name, identifiers, context.
 - mira_template_models.grounded_concepts: {variable_name: {identifiers,
-  context}}; sometimes wrapped in a one-element list.
+  context}}, sometimes wrapped in a one-element list.
 - scenario_parameters.distribution: e.g.
   {"type": "Uniform1", "parameters": {"minimum": 0.1, "maximum": 0.5}}.
 
@@ -70,7 +70,7 @@ compartment, e.g. E_0 or I0, not in the template model's initials.
 ## Query tips
 
 - Cast JSON columns to jsonb for operators: mira_template_model::jsonb.
-- Prefer the curated tools for common lookups; use SQL for aggregates and
+- Prefer the curated tools for common lookups. Use SQL for aggregates and
   cross-paper questions.
 """
 
@@ -120,8 +120,8 @@ def _jsonable(value, max_chars: int):
 def check_read_only_sql(sql: str) -> str:
     """Validate that ``sql`` is a single read-only statement.
 
-    This is a usability check that gives the agent a clear error message;
-    the READ ONLY transaction in ``run_sql`` is what enforces it.
+    This is a usability check that gives the agent a clear error message.
+    The READ ONLY transaction in ``run_sql`` is what enforces it.
 
     Returns
     -------
@@ -235,7 +235,8 @@ def get_publication(client: MiraDatabaseClient, pmid: str) -> dict | None:
         )
         .join(ODEs, MiraModel.ode_ref == ODEs.id)
         .join(TextContent, ODEs.txt_content_ref == TextContent.id)
-        .join(ExtractionMethod, ODEs.extraction_method_id == ExtractionMethod.id)
+        .join(ExtractionMethod,
+              ODEs.extraction_method_id == ExtractionMethod.id)
         .where(
             TextContent.text_ref == ref["id"],
             MiraModel.mira_template_model.isnot(None),
@@ -263,8 +264,10 @@ def get_publication(client: MiraDatabaseClient, pmid: str) -> dict | None:
             func.count(ScenarioParameter.id).label("parameter_count"),
         )
         .join(TextContent, Scenario.txt_content_ref == TextContent.id)
-        .join(ExtractionMethod, Scenario.extraction_method_id == ExtractionMethod.id)
-        .outerjoin(ScenarioParameter, ScenarioParameter.scenario_ref == Scenario.id)
+        .join(ExtractionMethod,
+              Scenario.extraction_method_id == ExtractionMethod.id)
+        .outerjoin(ScenarioParameter,
+                   ScenarioParameter.scenario_ref == Scenario.id)
         .where(TextContent.text_ref == ref["id"])
         .group_by(Scenario.id, ExtractionMethod.extraction_method)
         .order_by(Scenario.id)
@@ -275,7 +278,8 @@ def get_publication(client: MiraDatabaseClient, pmid: str) -> dict | None:
             "name": row["name"],
             "extraction_method": row["extraction_method"],
             "model_ref": (
-                f"db:{row['mira_model_ref']}" if row["mira_model_ref"] else None
+                f"db:{row['mira_model_ref']}" if row["mira_model_ref"]
+                else None
             ),
             "parameter_count": row["parameter_count"],
         }
@@ -331,7 +335,8 @@ def get_scenario(client: MiraDatabaseClient, scenario_id: int) -> dict | None:
         )
         .join(TextContent, Scenario.txt_content_ref == TextContent.id)
         .join(TextRef, TextContent.text_ref == TextRef.id)
-        .join(ExtractionMethod, Scenario.extraction_method_id == ExtractionMethod.id)
+        .join(ExtractionMethod,
+              Scenario.extraction_method_id == ExtractionMethod.id)
         .where(Scenario.id == int(scenario_id))
     )
     if not rows:

@@ -57,7 +57,7 @@ def _model_warnings(tm: TemplateModel) -> list[str]:
     undeclared = undeclared_rate_symbols(tm)
     if undeclared:
         warnings.append(
-            f"Rate laws use undeclared symbols {sorted(undeclared)}; add them "
+            f"Rate laws use undeclared symbols {sorted(undeclared)}. Add them "
             "with mira_add_parameter."
         )
     known = (set(tm.get_concepts_name_map()) | set(tm.parameters)
@@ -198,7 +198,8 @@ def _define_rate_law_symbols(
             continue
         attrs = (parameters or {}).get(symbol, {})
         tm.parameters[symbol] = _new_parameter(symbol, **attrs)
-        (with_value if attrs.get("value") is not None else without_value).append(symbol)
+        (with_value if attrs.get("value") is not None
+         else without_value).append(symbol)
     return with_value, without_value
 
 
@@ -254,7 +255,7 @@ def add_state(
 
 
 def remove_state(store: ModelStore, model_ref: str, name: str) -> dict:
-    """Remove a state, every transition involving it and its initial; its
+    """Remove a state, every transition involving it and its initial. Its
     symbol is replaced by 0 in observables."""
     tm = store.get(model_ref)
     _require_state(tm, name)
@@ -273,7 +274,7 @@ def remove_state(store: ModelStore, model_ref: str, name: str) -> dict:
         "observables_with_state_set_to_0": changed_observables,
         "parameters_now_unused": _unused_parameters(tm),
         "note": "Transition IDs of unnamed transitions (t<n>) shift after "
-                "removals; use mira_get_model for the current IDs.",
+                "removals. Use mira_get_model for the current IDs.",
     })
 
 
@@ -389,7 +390,8 @@ def remove_parameter(
     changes = {"removed_parameter": name, "substituted_value": value}
     if zeroed:
         changes["transitions_with_zero_rate"] = zeroed
-    return _commit(store, tm, model_ref, f"remove_parameter({name!r})", changes)
+    return _commit(store, tm, model_ref, f"remove_parameter({name!r})",
+                   changes)
 
 
 def update_parameter(
@@ -441,9 +443,11 @@ def eliminate_unused_parameters(store: ModelStore, model_ref: str) -> dict:
     tm = store.get(model_ref)
     unused = _unused_parameters(tm)
     tm.eliminate_unused_parameters()
-    # MIRA only checks rate laws here; keep anything initials/observables use
+    # MIRA only checks rate laws here, so keep anything initials or
+    # observables use
     return _commit(store, tm, model_ref, "eliminate_unused_parameters",
-                   {"removed_parameters": sorted(set(unused) - set(tm.parameters))})
+                   {"removed_parameters":
+                    sorted(set(unused) - set(tm.parameters))})
 
 
 def merge_duplicate_parameters(
@@ -469,7 +473,7 @@ def aggregate_model_parameters(store: ModelStore, model_ref: str) -> dict:
     missing = sorted(n for n, p in tm.parameters.items() if p.value is None)
     if missing:
         raise ValueError(
-            f"Parameters {missing} have no value; aggregation multiplies "
+            f"Parameters {missing} have no value. Aggregation multiplies "
             "parameter values together. Set them first (mira_set_values or "
             "mira_apply_scenario)."
         )
@@ -509,10 +513,10 @@ def add_transition(
     mass_action_parameter: str | None = None,
     parameters: dict[str, dict] | None = None,
 ) -> dict:
-    """Add a transition; its type follows from which states are given.
+    """Add a transition. Its type follows from which states are given.
 
-    subject + outcome: conversion; outcome only: production; subject only:
-    degradation; with controllers, the controlled (one controller) or
+    subject + outcome: conversion, outcome only: production, subject only:
+    degradation. With controllers, the controlled (one controller) or
     grouped-controlled (several) variant. Without a rate law, a mass-action
     rate law with ``mass_action_parameter`` is used.
     """
@@ -534,7 +538,8 @@ def add_transition(
         name,
     ))
     if not rate_law:
-        param = mass_action_parameter or f"k_{name or f't{len(tm.templates) + 1}'}"
+        param = (mass_action_parameter
+                 or f"k_{name or f't{len(tm.templates) + 1}'}")
         template.set_mass_action_rate_law(param)
     with_value, without_value = _define_rate_law_symbols(
         tm, template.rate_law, parameters
@@ -550,16 +555,18 @@ def add_transition(
                    f"add_transition({type(template).__name__})", changes)
 
 
-def remove_transition(store: ModelStore, model_ref: str, transition: str) -> dict:
+def remove_transition(store: ModelStore, model_ref: str,
+                      transition: str) -> dict:
     tm = store.get(model_ref)
     index = find_transition(tm, transition)
     removed = describe_template(tm.templates[index], index)
     tm.templates.pop(index)
-    return _commit(store, tm, model_ref, f"remove_transition({removed['id']!r})", {
+    return _commit(store, tm, model_ref,
+                   f"remove_transition({removed['id']!r})", {
         "removed_transition": removed,
         "parameters_now_unused": _unused_parameters(tm),
         "note": "Transition IDs of unnamed transitions (t<n>) shift after "
-                "removals; use mira_get_model for the current IDs.",
+                "removals. Use mira_get_model for the current IDs.",
     })
 
 
@@ -580,7 +587,8 @@ def update_transition(
     if new_name:
         if any(t.name == new_name for i, t in enumerate(tm.templates)
                if i != index):
-            raise ValueError(f"A transition named {new_name!r} already exists.")
+            raise ValueError(f"A transition named {new_name!r} already "
+                             "exists.")
         template.name = new_name
         changed["name"] = new_name
     if display_name is not None:
@@ -602,7 +610,8 @@ def update_transition(
         raise ValueError("Nothing to change: pass new_name, rate_law or "
                          "display_name.")
     return _commit(store, tm, model_ref, f"update_transition({transition!r})",
-                   {"transition": describe_template(template, index), "set": changed})
+                   {"transition": describe_template(template, index),
+                    "set": changed})
 
 
 # ---------------------------------------------------------------------------
@@ -679,7 +688,7 @@ def update_observable(
 
 def set_annotations(store: ModelStore, model_ref: str, **fields) -> dict:
     """Set model-level annotations. Fields given replace the old value
-    (lists included); fields omitted are kept. Authors have their own
+    (lists included). Fields omitted are kept. Authors have their own
     tools."""
     tm = store.get(model_ref)
     ann = _annotations(tm)
@@ -741,7 +750,8 @@ def set_time(
                    {"time": tm.time.to_json()})
 
 
-def merge_models(store: ModelStore, model_ref: str, other_model_ref: str) -> dict:
+def merge_models(store: ModelStore, model_ref: str,
+                 other_model_ref: str) -> dict:
     """Add another model's transitions, parameters, initials and observables
     (``TemplateModel.extend``). On name clashes the first model's
     definitions are kept."""
@@ -772,7 +782,8 @@ def merge_models(store: ModelStore, model_ref: str, other_model_ref: str) -> dic
                    changes)
 
 
-def apply_db_scenario(store: ModelStore, model_ref: str, scenario: dict) -> dict:
+def apply_db_scenario(store: ModelStore, model_ref: str,
+                      scenario: dict) -> dict:
     """Bake a DB scenario (from ``db_tools.get_scenario``) into a model:
     parameter values, plus initials from parameters like ``I_0``."""
     from miradb.mcp.simulate import apply_scenario
