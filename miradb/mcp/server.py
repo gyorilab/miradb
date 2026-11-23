@@ -68,21 +68,20 @@ For questions the curated tools don't answer, read the miradb://schema
 resource (or db_describe_schema) and use db_run_sql (read-only).
 """
 
-# Get allowed hosts and origins environment variables
-_allowed_hosts_env = os.environ["MCP_ALLOWED_HOSTS"]
-_allowed_origins_env = os.environ["MCP_ALLOWED_ORIGINS"]
-_allowed_hosts = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
-_allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
-
+# Hosts and origins allowed by DNS rebinding protection. Without them,
+# FastMCP allows only localhost.
+_hosts = os.environ.get("MCP_ALLOWED_HOSTS")
+_origins = os.environ.get("MCP_ALLOWED_ORIGINS", "")
+_transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[h.strip() for h in _hosts.split(",") if h.strip()],
+    allowed_origins=[o.strip() for o in _origins.split(",") if o.strip()],
+) if _hosts else None
 
 mcp = FastMCP(
     "miradb",
     instructions=INSTRUCTIONS,
-    transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=_allowed_hosts,
-        allowed_origins=_allowed_origins,
-    ),
+    transport_security=_transport_security,
 )
 
 _db_label = os.environ.get("MCP_MIRADB_DB", "primary")
