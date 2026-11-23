@@ -443,11 +443,8 @@ def eliminate_unused_parameters(store: ModelStore, model_ref: str) -> dict:
     tm = store.get(model_ref)
     unused = _unused_parameters(tm)
     tm.eliminate_unused_parameters()
-    # MIRA only checks rate laws here, so keep anything initials or
-    # observables use
     return _commit(store, tm, model_ref, "eliminate_unused_parameters",
-                   {"removed_parameters":
-                    sorted(set(unused) - set(tm.parameters))})
+                   {"removed_parameters": unused})
 
 
 def merge_duplicate_parameters(
