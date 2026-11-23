@@ -8,6 +8,7 @@ import pandas as pd
 import pystow
 import tqdm
 import traceback
+from datetime import datetime
 
 from mira.openai_utility import OpenAIClient
 from mira.sources.sympy_ode.paper_extraction import \
@@ -24,11 +25,6 @@ POSITIVE_PAPERS_PATH = Path(
 
 BASE = pystow.module("mira", "paper_extraction")
 
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
-
-
 def result_to_intermediates(result):
     """Map a mira PipelineResult to the flat intermediates dict we persist.
 
@@ -41,7 +37,8 @@ def result_to_intermediates(result):
         if grounding is not None and grounding.concepts:
             concepts = {
                 k: v if isinstance(v, dict) else v.to_json()
-                if hasattr(v, "to_json") else ValueError(f"Unexpected concept type: {type(v)}")
+                if hasattr(v, "to_json") else ValueError(f"Unexpected \
+                                                         concept type: {type(v)}")
                 for k, v in grounding.concepts.items()
             }
 
@@ -58,8 +55,10 @@ def result_to_intermediates(result):
     }
 
 
-def save_with_intermediates(template_model, result, pmid, folder_name):
-    """Save both intermediate extraction results and the final model.
+def save_with_intermediates(template_model, result, scenarios, pmid,
+                            folder_name):
+    """Save the intermediate extraction results, the final model and the
+    extracted scenarios.
 
     Parameters
     ----------
@@ -67,6 +66,10 @@ def save_with_intermediates(template_model, result, pmid, folder_name):
         The extracted template model.
     result :
         The mira PipelineResult from get_template_model_from_pmid.
+    scenarios :
+        The list of mira Scenarios from get_template_model_from_pmid. Saved
+        even when empty, so a paper with no parameter tables can be told
+        apart from one that was not processed.
     pmid :
         PubMed ID.
     folder_name :
@@ -80,19 +83,24 @@ def save_with_intermediates(template_model, result, pmid, folder_name):
         json.dump(intermediates, f, indent=2)
     with open(out_dir / f"{pmid}.json", 'w') as f:
         json.dump(template_model.to_json(), f, indent=2)
+    # Unevaluated parameter values such as 1/5.2 are sympy expressions;
+    # default=str writes them as strings, e.g. "1/5.2".
+    with open(out_dir / f"{pmid}_scenarios.json", 'w') as f:
+        json.dump([s.to_json() for s in scenarios], f, indent=2, default=str)
 
 
 def main():
     # Load the list of PMIDs for papers that were classified as relevant
     # (positive) by the trained model.
-    df = pd.read_csv(POSITIVE_PAPERS_PATH, sep='\t')
 
+    df = pd.read_csv(POSITIVE_PAPERS_PATH, sep='\t')
+    
     # Initialize the OpenAI client with the desired model and temperature. 
     # Temperature is set to 0.0 for deterministic outputs.
     client = OpenAIClient(model="gpt-5.4-mini", temperature=0.0)
 
     # modify based on preferred settings
-    extractor = "mineru"  # options: "mineru" or "marker" or "xml"
+    extractor = "xml"  # options: "mineru" or "marker" or "xml"
     extraction_method = "text"  # options: "text" or "image"
 
     # Canonical extraction-method folder name that populate_db.py reads (see
@@ -104,8 +112,8 @@ def main():
     # Track progress - append to CSV after each success
     output_directory = BASE.join(folder_name)
     output_directory.mkdir(parents=True, exist_ok=True)
-    progress_file = output_directory / "extraction_progress.csv"
-    print(f"Saving progress to {progress_file}")
+    progress_file = output_directory / "extraction_progress_v2.csv"
+    logger.info(f"Saving progress to {progress_file}")
 
     pmid_to_download_mapping = get_pmid_pmc_download_mapping()
 
@@ -120,12 +128,13 @@ def main():
     for idx, row in tqdm.tqdm(df.iterrows(), total=len(df)):
         pmid = str(row["PMID"])
         # Skip if already processed
+        pmid = str(pmid)
         if pmid in processed_pmids:
-            logger.info(f"PMID {pmid} already attempted, skipping...")
+            logger.info(f"\n\n#{idx} PMID {pmid} already attempted, skipping...\n")
             continue
         try:
             logger.info(f"#{idx} - Processing PMID {pmid}...")
-            tm, result = get_template_model_from_pmid(
+            tm, result, scenarios = get_template_model_from_pmid(
                 pmid=pmid, ode_extraction_method=extraction_method,
                 extractor=extractor,
                 pmid_to_download_mapping=pmid_to_download_mapping,
@@ -141,27 +150,46 @@ def main():
             
             # Create OdeModel only for validation, then release
             om = OdeModel(Model(tm), initialized=True)
-            save_with_intermediates(tm, result, pmid, folder_name)
+            save_with_intermediates(tm, result, scenarios, pmid, folder_name)
+            logger.info(f"PMID {pmid} - Saved {len(scenarios)} scenario(s).")
             # Explicitly cleanup. Memory usage gets high if there are many papers.
-            del om, tm
+            del om, tm, scenarios
 
             with open(progress_file, 'a') as f:
                 f.write(f"{pmid};success;\n")
 
         except Exception as e:
-            logger.warning(f"Failed to extract model for PMID {pmid}: {e}")
+            logger.warning(f"Failed to extract model for PMID {pmid}: \
+                           {type(e).__name__}")
             with open(progress_file, 'a') as f:
                 f.write(f"{pmid};failed;{type(e).__name__}:{str(e)}\n")
             continue
         finally:
             gc.collect()
-        break
 
-    llm_settings_file = output_directory / "llm_settings.txt"
+    ls_filename = f"llm_settings_{now.strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+    llm_settings_file = output_directory / ls_filename
+
     client.save_client_usage(filepath=llm_settings_file)
+    with open(llm_settings_file, "a") as f:
+        f.write(f"\n Log dump filename: {logdump_file}")
+
     logger.info(f"Saved LLM usage settings to {llm_settings_file}")
 
-    client.close()
-
 if __name__ == "__main__":
+    now = datetime.now()
+    log_dir = Path(__file__).resolve().parent.parent / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logdump_file = log_dir / f'app_{now.strftime("%Y-%m-%d-%H-%M-%S")}.log'
+    logging.basicConfig(filename=logdump_file,
+                        filemode='a',
+                        level=logging.INFO,
+                        format="%(asctime)s [%(levelname)s] %(message)s",
+                        force=True)
+
+    logger = logging.getLogger(__name__)
+    logger.info("Handlers: %s", logging.root.handlers)
+    for h in logging.root.handlers:
+        if hasattr(h, 'baseFilename'):
+            logger.info("Log file path: %s", h.baseFilename)
     main()
