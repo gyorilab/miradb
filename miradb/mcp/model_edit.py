@@ -32,7 +32,6 @@ from mira.metamodel.units import Unit
 from mira.sources.util import transition_to_templates
 
 from miradb.mcp.mira_tools import (
-    _template_concepts,
     describe_template,
     find_transition,
     parse_expression,
@@ -164,7 +163,7 @@ def _state_concepts(tm: TemplateModel, name: str):
     (and in its initial), so edits must reach all of them.
     """
     for template in tm.templates:
-        for concept in _template_concepts(template):
+        for concept in template.get_concepts_flat():
             if concept.name == name:
                 yield concept
     for initial in tm.initials.values():

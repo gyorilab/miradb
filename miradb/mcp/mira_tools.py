@@ -39,10 +39,6 @@ def _concept_summary(concept) -> dict:
     return out
 
 
-def _template_concepts(template):
-    return [c for c in template.get_concepts_flat() if c is not None]
-
-
 def ensure_time(tm: TemplateModel) -> TemplateModel:
     """Give the model a time variable so time-dependent rate laws resolve."""
     if tm.time is None:
@@ -81,13 +77,10 @@ def undeclared_rate_symbols(tm: TemplateModel) -> set[str]:
     was never declared as a parameter; MIRA cannot build ODEs for them
     until it is.
     """
-    known = set(tm.get_concepts_name_map()) | set(tm.parameters or {})
+    known = set(tm.get_concepts_name_map()) | set(tm.parameters)
     if tm.time is not None:
         known.add(tm.time.name)
-    used = set()
-    for template in tm.templates:
-        if template.rate_law is not None:
-            used |= {str(s) for s in template.rate_law.free_symbols}
+    used = set().union(*(t.get_parameter_names() for t in tm.templates))
     return used - known - {"t"}
 
 
@@ -118,7 +111,7 @@ def describe_template(template, index: int) -> dict:
     return {
         "id": transition_id(template, index),
         "type": template.type,
-        "concepts": [c.name for c in _template_concepts(template)],
+        "concepts": [c.name for c in template.get_concepts_flat()],
         "rate_law": str(template.rate_law) if template.rate_law else None,
     }
 
@@ -128,14 +121,14 @@ def summarize_model(tm: TemplateModel, model_ref: str | None = None) -> dict:
     concepts = {}
     transitions = []
     for index, template in enumerate(tm.templates):
-        for concept in _template_concepts(template):
+        for concept in template.get_concepts_flat():
             concepts.setdefault(concept.name, _concept_summary(concept))
         transitions.append(
             {
                 "id": transition_id(template, index),
                 "name": template.name,
                 "type": template.type,
-                "concepts": [c.name for c in _template_concepts(template)],
+                "concepts": [c.name for c in template.get_concepts_flat()],
                 "rate_law": str(template.rate_law) if template.rate_law else None,
             }
         )
