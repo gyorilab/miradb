@@ -90,6 +90,7 @@ def generate_score_only_report(report: dict, e1: int, pmid: str, progress_file_f
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     progress_file_folder = Path("results")
     progress_filename = "report"
 
