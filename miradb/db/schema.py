@@ -97,7 +97,6 @@ class TextAnnotation(Base, EpiTable):
     pathogens = Column(ARRAY(String), nullable=False, default=list)
     hosts = Column(ARRAY(String), nullable=False, default=list)
     locations = Column(ARRAY(String), nullable=False, default=list)
-    model_types = Column(ARRAY(String), nullable=False, default=list)
     term_provenance = Column(JSONB, nullable=True)
     # True if NLM indexed the paper with MeSH (MEDLINE), so MeSH terms were
     # available as a source in addition to PubTator and text matching
