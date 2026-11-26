@@ -157,19 +157,19 @@ def _install_browser_landing(app) -> None:
     raise RuntimeError(f"No route for MCP path {path!r}")
 
 
-@mcp.custom_route("/health", methods=["GET"])
+@mcp.custom_route("/mcp/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
     """Health check endpoint for monitoring."""
     return JSONResponse({"status": "healthy", "service": "miradb"})
 
 
-@mcp.custom_route("/docs", methods=["GET"])
+@mcp.custom_route("/mcp/docs", methods=["GET"])
 async def docs_page(request: Request) -> HTMLResponse:
-    """Serve the tool reference page. It renders /docs.json."""
+    """Serve the tool reference page. It renders /mcp/docs.json."""
     return HTMLResponse(_DOCS_PAGE)
 
 
-@mcp.custom_route("/docs.json", methods=["GET"])
+@mcp.custom_route("/mcp/docs.json", methods=["GET"])
 async def docs_json(request: Request) -> JSONResponse:
     """Every tool (with its input schema) and resource, generated from
     the registered definitions."""

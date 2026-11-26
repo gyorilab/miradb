@@ -1,4 +1,4 @@
-"""Data for the server's /docs page, built from its registered tools and
+"""Data for the server's /mcp/docs page, built from its registered tools and
 resources so the reference never goes out of date."""
 
 import inspect

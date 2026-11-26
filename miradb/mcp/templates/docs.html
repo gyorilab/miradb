@@ -508,7 +508,7 @@
         </main>
 
         <div class="footer">
-            <p>Generated from <a href="docs.json">docs.json</a> · <a href="/mcp">Back to overview</a> ·
+            <p>Generated from <a href="/mcp/docs.json">docs.json</a> · <a href="/mcp">Back to overview</a> ·
                 <a href="https://github.com/gyorilab/miradb/issues" target="_blank">Report issues</a></p>
         </div>
     </div>
@@ -692,7 +692,7 @@
             });
             window.addEventListener('hashchange', openFromHash);
 
-            fetch('docs.json')
+            fetch('/mcp/docs.json')
                 .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
                 .then(json => { data = json; render(); })
                 .catch(() => {
