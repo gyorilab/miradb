@@ -290,6 +290,7 @@ def get_client(name: str = "primary") -> MiraDatabaseClient:
 
 TABLE_ORDER = [
     "text_references",
+    "text_annotations",
     "extraction_method",
     "text_contents",
     "ode_expressions",

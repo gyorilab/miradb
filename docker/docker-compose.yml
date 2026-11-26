@@ -24,6 +24,13 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: miradb.app:latest
+    entrypoint:
+      [
+        "gunicorn", "-w", "2", "-t", "300", "-b", "0.0.0.0:5000",
+        "--access-logfile", "-", "--error-logfile", "-",
+        "--log-level", "info", "--capture-output",
+        "miradb.sources.app:app",
+      ]
     ports:
       - "8003:5000"
     environment:
@@ -47,6 +54,36 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    networks:
+      - miradb_net
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: miradb.mcp:latest
+    entrypoint:
+      [
+        "miradb-mcp", "--transport", "streamable-http",
+        "--host", "0.0.0.0", "--port", "8004",
+      ]
+    ports:
+      - "8004:8004"
+    environment:
+      MIRADB_DB_HOST: db
+      MIRADB_DB_PORT: "5432"
+      MIRADB_DB_USER: postgres
+      MIRADB_DB_PASSWORD: miradb
+      MIRADB_DB_NAME: mira_db
+      MIRADB_DB_DIALECT: postgresql
+      MIRADB_DB_DRIVER: psycopg
+      PYTHONUNBUFFERED: "1"
+      MIRA_REST_URL: "http://mira-epi-dkg-lb-dc1e19b273dedaa2.elb.us-east-1.amazonaws.com/api"
+      MCP_ALLOWED_HOSTS: "epimodels.io,localhost:8004,0.0.0.0:8004"
+      MCP_ALLOWED_ORIGINS: "https://epimodels.io,http://localhost:8004,http://0.0.0.0:8004"
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - miradb_net
 

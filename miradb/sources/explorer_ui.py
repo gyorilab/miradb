@@ -1,25 +1,21 @@
 import logging
-import re
-import math
+import threading
+import time
+from pathlib import Path
 
 from flask import Blueprint, jsonify, render_template, request, send_file, abort
 import json
 import io
+from miradb import export
 from miradb.db.client import get_client
 from miradb.db import queries
 from miradb.db.extraction_methods import EXTRACTION_METHODS_PRIORITY
-from mira.modeling import Model
-from mira.modeling.ode import OdeModel
-from mira.metamodel.template_model import Time
-from mira.modeling.sbml import template_model_to_sbml_string
 
 
 logger = logging.getLogger(__name__)
 
 explorer_blueprint = Blueprint("explorer", __name__, url_prefix="/explorer")
 explorer_blueprint.template_folder = "templates"
-
-symbol_re = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\b")
 
 _client = None
 
@@ -97,6 +93,78 @@ def get_all_pmids():
     """
     rows = queries.list_publication_summaries(get_db_client())
     return jsonify(rows)
+
+
+# GeoNames location ID -> country code, built by
+# scripts/build_geonames_countries.py
+GEONAMES_COUNTRIES_PATH = Path(__file__).parent / "geonames_countries.json"
+
+OVERVIEW_TTL_SECONDS = 600
+_overview_cache = {"data": None, "time": 0.0}
+_overview_lock = threading.Lock()
+
+
+def _load_geonames_countries() -> dict:
+    try:
+        return json.loads(GEONAMES_COUNTRIES_PATH.read_text())
+    except FileNotFoundError:
+        logger.warning(
+            "%s not found; run scripts/build_geonames_countries.py. "
+            "The overview map will be empty.", GEONAMES_COUNTRIES_PATH
+        )
+        return {"locations": {}, "countries": {}}
+
+
+def _build_overview() -> dict:
+    geo = _load_geonames_countries()
+    to_country = geo["locations"]
+    papers = queries.list_annotation_overview(get_db_client())
+    for paper in papers:
+        paper["countries"] = sorted({
+            to_country[t["id"].partition(":")[2]]
+            for t in paper["locations"]
+            if t["id"].startswith("geonames:")
+            and t["id"].partition(":")[2] in to_country
+        })
+    return {"papers": papers, "countries": geo["countries"]}
+
+
+@explorer_blueprint.route("/api/overview")
+def get_overview():
+    """Return per-paper annotations for the explorer overview map and charts.
+
+    The response is cached for OVERVIEW_TTL_SECONDS, since it covers every
+    publication and the underlying data changes only on ingestion.
+
+    Response format:
+    {
+        "papers": [
+            {
+                "pmid": "34671103",
+                "title": "...",
+                "author_list": "...",
+                "pub_year": 2021,
+                "model_count": 5,
+                "scenario_count": 1,
+                "diseases":  [{"id": "doid:0080600", "label": "COVID-19"}],
+                "pathogens": [...],
+                "hosts":     [...],
+                "locations": [{"id": "geonames:1733045", "label": "Malaysia"}],
+                "countries": ["MY", "CN"],
+                "compartments": 3
+            },
+            ...
+        ],
+        "countries": {"MY": {"name": "Malaysia", "iso_numeric": "458"}, ...}
+    }
+    """
+    with _overview_lock:
+        now = time.monotonic()
+        if (_overview_cache["data"] is None
+                or now - _overview_cache["time"] > OVERVIEW_TTL_SECONDS):
+            _overview_cache["data"] = _build_overview()
+            _overview_cache["time"] = now
+        return jsonify(_overview_cache["data"])
 
 
 @explorer_blueprint.route("/api/pmids/<pmid>/models")
@@ -181,18 +249,7 @@ def download_sbml(ode_id: int):
         abort(404, description=f"No TemplateModel found for ode id {ode_id}")
 
     try:
-        # SBML does not allow empty/nan parameter values
-        for param in tm.parameters.values():
-            if param.value is None or (
-                isinstance(param.value, float) and math.isnan(param.value)
-            ):
-                param.value = 0.0
-            elif not isinstance(param.value, (int, float)):
-                try:
-                    param.value = float(param.value)
-                except (TypeError, ValueError):
-                    param.value = 0.0
-        sbml_str = template_model_to_sbml_string(tm)
+        sbml_str = export.to_sbml(tm)
     except Exception as e:
         logger.error(f"SBML export failed for ode id {ode_id}")
         logger.exception(e)
@@ -215,66 +272,10 @@ def download_sympy(ode_id: int):
         abort(404, description=f"No TemplateModel found for ode id {ode_id}")
 
     try:
-        tm.time = Time(name="t", units=None)
-        om = OdeModel(model=Model(template_model=tm), initialized=False)
-        kinetics = om.get_interpretable_kinetics()
-
-        # Collect (lhs_str, rhs_str) pairs
-        ode_pairs = []
-        if hasattr(kinetics, "tolist"):
-            for row in kinetics.tolist():
-                if len(row) == 3:
-                    lhs, _, rhs = row
-                    ode_pairs.append((str(lhs), str(rhs)))
-                elif len(row) == 2:
-                    lhs, rhs = row
-                    ode_pairs.append((str(lhs), str(rhs)))
-        elif isinstance(kinetics, (list, tuple)):
-            for expr in kinetics:
-                ode_pairs.append((str(expr), ""))
-        else:
-            ode_pairs.append((str(kinetics), ""))
-
+        py_str = export.to_sympy(tm)
     except Exception:
         logger.exception(f"SymPy export failed for ode_id={ode_id}")
         abort(500, description="SymPy ODE export failed - see server logs.")
-
-    lines = [
-        "from sympy import *",
-        "",
-    ]
-
-    # Declare all symbols that appear across lhs + rhs
-    all_symbols: set[str] = set()
-    skip = {"Derivative", "Function", "Symbol", "symbols", "t"}
-    for lhs, rhs in ode_pairs:
-        for token in symbol_re.findall(lhs + " " + rhs):
-            if token not in skip:
-                all_symbols.add(token)
-
-    if all_symbols:
-        lines.append("# Declare symbols")
-        lines.append(
-            f"{', '.join(sorted(all_symbols))} = symbols('{' '.join(sorted(all_symbols))}')"
-        )
-        lines.append("")
-
-    for lhs, rhs in ode_pairs:
-        if rhs:
-            lines.append(f"# {lhs} = {rhs}")
-        else:
-            lines.append(f"# {lhs}")
-
-    lines += [
-        "",
-        "odes = {",
-    ]
-    for lhs, rhs in ode_pairs:
-        if rhs:
-            lines.append(f"    {lhs!r}: {rhs},")
-    lines.append("}")
-
-    py_str = "\n".join(lines) + "\n"
 
     return send_file(
         io.BytesIO(py_str.encode()),

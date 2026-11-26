@@ -2,7 +2,8 @@ import json
 import logging
 import math
 
-from sqlalchemy import Text, cast, func, literal, or_, select
+from sqlalchemy import Text, case, cast, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.expression import text as sa_text
 from sympy import Derivative, latex
@@ -18,6 +19,7 @@ from miradb.db.schema import (
     ODEs,
     Scenario,
     ScenarioParameter,
+    TextAnnotation,
     TextContent,
     TextRef,
 )
@@ -212,6 +214,19 @@ def _pmids_matching_grounded_concepts_subquery():
     )
 
 
+def _publication_match(pattern: str):
+    # The pattern is also bound as :pattern in the grounded concepts subquery
+    return or_(
+        TextRef.pmid.ilike(pattern),
+        TextRef.title.ilike(pattern),
+        cast(TextRef.authors, Text).ilike(pattern),
+        cast(TextRef.year, Text).ilike(pattern),
+        TextRef.pmid.in_(
+            select(_pmids_matching_grounded_concepts_subquery().c.pmid)
+        ),
+    )
+
+
 def list_publication_summaries(client: MiraDatabaseClient) -> list[dict]:
     """Return text_references that have at least one converted TemplateModel.
 
@@ -259,6 +274,98 @@ def list_publication_summaries(client: MiraDatabaseClient) -> list[dict]:
     return [_format_publication_summary(row) for row in rows]
 
 
+ANNOTATION_TERM_FIELDS = ("diseases", "pathogens", "hosts", "locations")
+
+# Count the distinct compartments (state variables) of each template model:
+# every concept that appears as a subject, outcome, controller or one of
+# several controllers in its templates. This matches the number of ODEs.
+_COMPARTMENT_COUNT_SQL = """
+    SELECT tr.pmid, em.extraction_method, count(DISTINCT c.name) AS n
+    FROM mira_template_models mtm
+    JOIN ode_expressions oe ON oe.id = mtm.ode_ref
+    JOIN extraction_method em ON em.id = oe.extraction_method_id
+    JOIN text_contents tc ON tc.id = oe.txt_content_ref
+    JOIN text_references tr ON tr.id = tc.text_ref
+    CROSS JOIN LATERAL jsonb_array_elements(
+        COALESCE(mtm.mira_template_model::jsonb -> 'templates', '[]'::jsonb)
+    ) AS t(tpl)
+    CROSS JOIN LATERAL (
+        SELECT tpl -> 'subject' ->> 'name'
+        UNION ALL SELECT tpl -> 'outcome' ->> 'name'
+        UNION ALL SELECT tpl -> 'controller' ->> 'name'
+        UNION ALL SELECT ctl ->> 'name'
+        FROM jsonb_array_elements(
+            CASE WHEN jsonb_typeof(tpl -> 'controllers') = 'array'
+                 THEN tpl -> 'controllers' ELSE '[]'::jsonb END
+        ) AS ctl
+    ) AS c(name)
+    WHERE mtm.mira_template_model IS NOT NULL AND c.name IS NOT NULL
+    GROUP BY tr.pmid, em.extraction_method
+"""
+
+
+def _best_model_compartment_counts(client: MiraDatabaseClient) -> dict[str, int]:
+    """Return the compartment count of each paper's preferred model.
+
+    The preferred model is the one the explorer shows on a paper's card:
+    the first extraction method in EXTRACTION_METHODS_PRIORITY that has a
+    model for that paper.
+    """
+    best: dict[str, tuple[int, int]] = {}
+    for row in client.query_sql(_COMPARTMENT_COUNT_SQL):
+        rank = _priority_index(row["extraction_method"])
+        if row["pmid"] not in best or rank < best[row["pmid"]][0]:
+            best[row["pmid"]] = (rank, int(row["n"]))
+    return {pmid: n for pmid, (_, n) in best.items()}
+
+
+def list_annotation_overview(client: MiraDatabaseClient) -> list[dict]:
+    """Return per-paper annotations and model size for the explorer overview.
+
+    Covers the same publications as ``list_publication_summaries`` (those
+    with at least one converted model) and adds, per paper, the annotation
+    terms from ``text_annotations`` with their labels and the number of
+    compartments in the paper's preferred model.
+
+    Returns
+    -------
+    :
+        A list of publication summaries, each with these extra keys:
+
+        - diseases, pathogens, hosts, locations: lists of
+          ``{"id": curie, "label": str}``
+        - compartments: compartment count of the preferred model, or None
+    """
+    summaries = list_publication_summaries(client)
+    rows = client.query(
+        select(
+            TextAnnotation.pmid,
+            *(getattr(TextAnnotation, f) for f in ANNOTATION_TERM_FIELDS),
+            TextAnnotation.term_provenance,
+        )
+    )
+    annotations = {row["pmid"]: row for row in rows}
+    compartments = _best_model_compartment_counts(client)
+
+    overview = []
+    for summary in summaries:
+        ann = annotations.get(summary["pmid"])
+        provenance = (ann["term_provenance"] if ann else None) or {}
+        terms = {}
+        for field in ANNOTATION_TERM_FIELDS:
+            labels = provenance.get(field) or {}
+            terms[field] = [
+                {"id": curie, "label": (labels.get(curie) or {}).get("label") or curie}
+                for curie in ((ann[field] if ann else None) or [])
+            ]
+        overview.append({
+            **summary,
+            **terms,
+            "compartments": compartments.get(summary["pmid"]),
+        })
+    return overview
+
+
 def search_publication_summaries(
     client: MiraDatabaseClient, q: str
 ) -> list[dict]:
@@ -284,23 +391,139 @@ def search_publication_summaries(
         raise ValueError("Search query cannot be empty.")
     pattern = f"%{q.lower()}%"
     ode_count_sq = _ode_count_subquery(outer_join_odes=False)
-    gc_pmid_sq = _pmids_matching_grounded_concepts_subquery()
     stmt = (
         _publication_summary_select(ode_count_sq)
-        .where(
-            or_(
-                TextRef.pmid.ilike(pattern),
-                TextRef.title.ilike(pattern),
-                cast(TextRef.authors, Text).ilike(pattern),
-                cast(TextRef.year, Text).ilike(pattern),
-                TextRef.pmid.in_(gc_pmid_sq),
-            )
-        )
+        .where(_publication_match(pattern))
         .where(func.coalesce(ode_count_sq.c.ode_count, 0) > 0)
         .order_by(func.coalesce(ode_count_sq.c.ode_count, 0).desc())
     )
     rows = client.query(stmt, {"pattern": pattern})
     return [_format_publication_summary(row) for row in rows]
+
+
+def _concept_match(curie: str):
+    # Match a grounding identifier or a context value anywhere in the model
+    prefix, _, identifier = curie.partition(":")
+    tm = cast(MiraModel.mira_template_model, JSONB)
+    variables = literal(
+        {"prefix": prefix.lower(), "id": identifier, "curie": curie}, JSONB
+    )
+    paths = [
+        "$.**.identifiers.keyvalue() ? (@.key == $prefix && @.value == $id)",
+        "$.**.context.* ? (@ == $curie)",
+    ]
+    return or_(
+        *(
+            func.jsonb_path_exists(tm, cast(path, JSONPATH), variables)
+            for path in paths
+        )
+    )
+
+
+def search_models(
+    client: MiraDatabaseClient,
+    *,
+    q: str | None = None,
+    pmids: list[str] | None = None,
+    method: str | None = None,
+    concept: str | None = None,
+    best: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+    full: bool = False,
+) -> tuple[int, list[dict]]:
+    """Return models matching all given filters, ordered by PMID and method.
+
+    Parameters
+    ----------
+    client :
+        An instance of MiraDatabaseClient.
+    q :
+        Search string matched against publication metadata and grounded
+        concepts, as in ``search_publication_summaries``.
+    pmids :
+        Only include models from these PubMed IDs.
+    method :
+        Only include models from this extraction method.
+    concept :
+        Only include models with a concept grounded to this CURIE, or with
+        this CURIE as a context value.
+    best :
+        Keep only the highest priority matching model for each publication.
+    limit :
+        Maximum number of models to return, all if None.
+    offset :
+        Number of models to skip.
+    full :
+        Include the TemplateModel JSON and grounded concepts of each model.
+
+    Returns
+    -------
+    :
+        The total number of matching models, and a list of dictionaries with
+        keys ``pmid``, ``method``, ``title`` and ``year``, plus
+        ``template_model`` and ``grounded_concepts`` if ``full`` is True.
+    """
+    priority = case(
+        {m: i for i, m in enumerate(EXTRACTION_METHODS_PRIORITY)},
+        value=ExtractionMethod.extraction_method,
+        else_=len(EXTRACTION_METHODS_PRIORITY),
+    )
+    columns = [
+        TextRef.pmid,
+        ExtractionMethod.extraction_method.label("method"),
+        TextRef.title,
+        TextRef.year,
+        priority.label("priority"),
+        func.row_number()
+        .over(partition_by=TextRef.pmid, order_by=priority)
+        .label("rank"),
+    ]
+    if full:
+        columns += [
+            MiraModel.mira_template_model.label("template_model"),
+            MiraModel.grounded_concepts,
+        ]
+    stmt = (
+        select(*columns)
+        .select_from(MiraModel)
+        .join(ODEs, MiraModel.ode_ref == ODEs.id)
+        .join(TextContent, ODEs.txt_content_ref == TextContent.id)
+        .join(TextRef, TextContent.text_ref == TextRef.id)
+        .join(
+            ExtractionMethod, ODEs.extraction_method_id == ExtractionMethod.id
+        )
+        .where(MiraModel.mira_template_model.isnot(None))
+    )
+    params = {}
+    if q:
+        params["pattern"] = f"%{q.lower()}%"
+        stmt = stmt.where(_publication_match(params["pattern"]))
+    if pmids:
+        stmt = stmt.where(TextRef.pmid.in_([str(p) for p in pmids]))
+    if method:
+        stmt = stmt.where(ExtractionMethod.extraction_method == method)
+    if concept:
+        stmt = stmt.where(_concept_match(concept))
+    sq = stmt.subquery()
+    where = [sq.c.rank == 1] if best else []
+
+    total = client.query_one(
+        select(func.count().label("n")).select_from(sq).where(*where),
+        params,
+    )["n"]
+    page = (
+        select(sq)
+        .where(*where)
+        .order_by(sq.c.pmid, sq.c.priority)
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = [
+        {k: v for k, v in row.items() if k not in {"priority", "rank"}}
+        for row in client.query(page, params)
+    ]
+    return total, rows
 
 
 def _priority_index(method_key: str) -> int:
@@ -406,7 +629,9 @@ def list_scenarios_for_pmid(client: MiraDatabaseClient, pmid: str) -> list[dict]
         - method_label: Short display name for the extraction method.
         - scenarios: List of scenarios in the order they were added, each a
           dictionary with keys ``id``, ``name``, ``description`` and
-          ``parameters``. Each parameter is a dictionary with keys ``name``,
+          ``mira_model_ref`` and ``parameters``. ``mira_model_ref`` is the
+          ``mira_template_models`` ID whose parameter names were used during
+          extraction, if any. Each parameter is a dictionary with keys ``name``,
           ``display_name``, ``description``, ``value``, ``value_expression``,
           ``units`` and ``distribution``.
     """
@@ -420,6 +645,7 @@ def list_scenarios_for_pmid(client: MiraDatabaseClient, pmid: str) -> list[dict]
             Scenario.id.label("scenario_id"),
             Scenario.name.label("scenario_name"),
             Scenario.description.label("scenario_description"),
+            Scenario.mira_model_ref,
             ExtractionMethod.extraction_method,
             ScenarioParameter.name,
             ScenarioParameter.display_name,
@@ -461,6 +687,7 @@ def list_scenarios_for_pmid(client: MiraDatabaseClient, pmid: str) -> list[dict]
                 "id": row["scenario_id"],
                 "name": row["scenario_name"],
                 "description": row["scenario_description"],
+                "mira_model_ref": row["mira_model_ref"],
                 "parameters": [],
             }
             scenarios[row["scenario_id"]] = scenario
@@ -536,7 +763,7 @@ def add_extraction_method(
     extraction_method: str,
     extraction_method_desc: str = None,
 ) -> int:
-    """Add an extraction method to the registry.
+    """Add an extraction method to the registry if it is not already there.
 
     Parameters
     ----------
@@ -551,8 +778,15 @@ def add_extraction_method(
     Returns
     -------
     :
-        The ID of the extraction method entry that was added.
+        The ID of the extraction method entry that was added, or of the
+        existing entry with the same name.
     """
+    existing_id = get_extraction_method_id(client, extraction_method)
+    if existing_id is not None:
+        logger.debug(
+            f"Extraction method '{extraction_method}' already registered."
+        )
+        return existing_id
 
     def _write(sess):
         row = ExtractionMethod(

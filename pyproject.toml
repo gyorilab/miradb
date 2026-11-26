@@ -11,11 +11,12 @@ license = "BSD-2-Clause"
 requires-python = ">=3.10"
 dependencies = [
     "flask",
+    "flask-openapi3[swagger]",
     "sqlalchemy>=2",
     "click",
     "gunicorn",
     "psycopg[binary]",
-    "mira[sbml,ode] @ git+https://github.com/gyorilab/mira.git",
+    "mira[sbml,ode,web,dkg-construct] @ git+https://github.com/gyorilab/mira.git",
 ]
 
 [project.optional-dependencies]
@@ -23,9 +24,18 @@ comparison = [
     "rapidfuzz",
     "zss",
 ]
+mcp = [
+    "mcp>=1.2,<2",
+]
+
+[project.scripts]
+miradb-mcp = "miradb.mcp.server:main"
 
 [project.urls]
 Repository = "https://github.com/gyorilab/miradb"
 
 [tool.setuptools.packages.find]
 include = ["miradb*"]
+
+[tool.setuptools.package-data]
+"miradb.mcp" = ["templates/*.html"]

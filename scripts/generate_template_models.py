@@ -12,7 +12,7 @@ from datetime import datetime
 
 from mira.openai_utility import OpenAIClient
 from mira.sources.sympy_ode.paper_extraction import \
-    get_template_model_from_pmid, get_pmid_pmc_download_mapping
+    get_template_model_from_pmid
 from mira.modeling import Model
 from mira.modeling.ode import OdeModel
 
@@ -115,8 +115,6 @@ def main():
     progress_file = output_directory / "extraction_progress_v2.csv"
     logger.info(f"Saving progress to {progress_file}")
 
-    pmid_to_download_mapping = get_pmid_pmc_download_mapping()
-
     processed_pmids = set()
     if progress_file.exists():
         progress_df = pd.read_csv(progress_file, header=None,
@@ -136,9 +134,7 @@ def main():
             logger.info(f"#{idx} - Processing PMID {pmid}...")
             tm, result, scenarios = get_template_model_from_pmid(
                 pmid=pmid, ode_extraction_method=extraction_method,
-                extractor=extractor,
-                pmid_to_download_mapping=pmid_to_download_mapping,
-                client=client)
+                extractor=extractor, client=client)
     
             if tm is None:
                 logger.warning(f"PMID {pmid} - No template model extracted.")

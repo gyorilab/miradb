@@ -1,8 +1,17 @@
 # Docker deployment
 
-There are two images: `Dockerfile.postgres` holding the database and 
-`Dockerfile` for the app. The database image is built with the SQL dump 
-copied in and loaded on first start.
+There are two images:
+
+- `Dockerfile.postgres` - holding the database. It copies a local SQL dump and 
+  loads it on first start.
+- `Dockerfile` - installs `miradb`. The app and the MCP server both use this 
+  image. `docker-compose.yml` sets a different entrypoint for each service.
+
+With `docker compose`, three services are run:
+
+- `db` - Database on port `5433` maps to container port `5432`.
+- `app` - Gunicorn running the main web app.
+- `mcp` - Streamable HTTP MCP server.
 
 ## Prerequisites
 
@@ -39,10 +48,12 @@ To build and run the full stack from the `docker` directory:
 cd docker
 docker compose up --build
 ```
-Once the stack is started, you can go to the landing page and the health 
-endpoint:
+
+Once the stack is started, you can open the landing page in a browser and
+connect a client to the same MCP URL:
 - App: http://localhost:8003 (redirects to `/explorer`)
-- Health: http://localhost:8003/health
+- MCP: http://localhost:8004/mcp (a browser GET shows the landing page; the same
+  URL is the Streamable HTTP MCP endpoint)
 
 The database connection is configured via `MIRADB_DB_*` in `docker-compose.yml`.
 
@@ -93,9 +104,9 @@ volume was reused - run `docker compose down -v` again before `up`.
 
 ## Files in this directory
 
-| File | Purpose                                                         |
-|------|-----------------------------------------------------------------|
-| `Dockerfile.postgres` | Postgres 17 + dump in `initdb.d`                                |
-| `Dockerfile` | App image (miradb + Gunicorn)                                   |
-| `docker-compose.yml` | `db` + `app` on `miradb_net`                                    |
+| File                      | Purpose                                                         |
+|---------------------------|-----------------------------------------------------------------|
+| `Dockerfile.postgres`     | Postgres 17 + dump in `initdb.d`                                |
+| `Dockerfile`              | App and MCP image; entrypoints are set per service in Compose  |
+| `docker-compose.yml`      | `db`, `app`, and `mcp` on `miradb_net`                          |
 | `test_build_db_docker.sh` | `docker build` for DB image + optional table-count verification |

@@ -107,6 +107,59 @@ LaTeX ODE equations using MIRA's `OdeModel`. Run it locally with:
 python -m miradb.sources.app
 ```
 
+## REST API
+
+The web service also exposes a REST API under `/api`, with an OpenAPI
+spec at `/api/docs/openapi.json` and interactive documentation at
+`/api/docs/swagger`. Models are addressed by PMID and extraction method.
+
+| Endpoint | Description |
+| --- | --- |
+| `GET /api/models` | Search models by `q`, `pmid`, `method` and `concept` (a grounding CURIE), paginated |
+| `GET /api/models/<pmid>` | The highest priority model of a publication |
+| `GET /api/models/<pmid>/<method>` | The model extracted by a given method |
+| `GET`/`POST /api/download` | All models matching the search filters, as JSON Lines or a zip of SBML or SymPy files |
+| `GET /api/publications` | List or search publications |
+| `GET /api/publications/<pmid>` | Publication metadata and its models |
+| `GET /api/publications/<pmid>/scenarios` | Scenarios and parameters of a publication |
+
+Model endpoints take `format=json|sbml|sympy`, and `best=true` keeps only
+the highest priority model per publication. For example:
+
+```bash
+curl "https://epimodels.io/api/models?concept=ido:0000514&best=true"
+curl -o models.jsonl "https://epimodels.io/api/download"
+```
+
+## MCP server
+
+An [MCP](https://modelcontextprotocol.io) server under `miradb/mcp/` lets
+LLM agents query MIRA-DB, work with its models through MIRA, and simulate
+them. Install it with the `mcp` extra and register it with a client, e.g.
+Claude Code:
+
+```bash
+python -m pip install -e ".[mcp]"
+claude mcp add miradb -- miradb-mcp
+```
+
+or run it as a shared service with
+`miradb-mcp --transport streamable-http --port 8004`. `--db` selects the
+database section of `db_config.ini`; a role with only `SELECT` grants is
+recommended.
+
+Models are passed between tools by handle: `db:<id>` for a row of
+`mira_template_models`, `ws:<id>` for a model derived during the session.
+
+| Group | Tools |
+| --- | --- |
+| Database | `db_search_publications`, `db_get_publication`, `db_get_odes`, `db_get_scenarios`, `db_get_scenario`, `db_describe_schema`, `db_run_sql` (read-only, row limit, timeout) |
+| MIRA | `mira_get_model`, `mira_get_equations`, `mira_stratify`, `mira_simplify_rate_laws`, `mira_set_values`, `mira_compare_models`, `mira_export_model` (TemplateModel or Petri net AMR), `mira_list_workspace` |
+| Simulation | `simulate_model` (optionally applying a DB scenario's parameters and `X_0` initials), `get_simulation` |
+
+Resources: `miradb://schema`, `miradb://model/{model_ref}` and
+`miradb://simulation/{sim_id}.csv`.
+
 ## Docker
 
 A two-container setup (database + app) is defined under [`docker/`](docker/).
