@@ -49,10 +49,11 @@ cd docker
 docker compose up --build
 ```
 
-Once the stack is started, you can go to the landing page and also connect to 
-the MCP server:
+Once the stack is started, you can open the landing page in a browser and
+connect a client to the same MCP URL:
 - App: http://localhost:8003 (redirects to `/explorer`)
-- MCP: http://localhost:8004/mcp (Streamable HTTP)
+- MCP: http://localhost:8004/mcp (a browser GET shows the landing page; the same
+  URL is the Streamable HTTP MCP endpoint)
 
 The database connection is configured via `MIRADB_DB_*` in `docker-compose.yml`.
 

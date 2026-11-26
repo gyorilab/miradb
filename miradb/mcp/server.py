@@ -25,8 +25,10 @@ import click
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import Field
+from starlette.datastructures import Headers
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.routing import Route
 
 from miradb.db.client import MiraDatabaseClient, get_client
 from miradb.mcp import compare, db_tools, docs, mira_tools, model_edit, \
@@ -119,9 +121,40 @@ _DOCS_PAGE = _TEMPLATES.joinpath("docs.html").read_text()
 
 
 @mcp.custom_route("/", methods=["GET"])
-async def landing_page(request: Request) -> HTMLResponse:
-    """Serve the HTML landing page at the root path."""
-    return HTMLResponse(_LANDING_PAGE)
+async def landing_page(request: Request) -> RedirectResponse:
+    """Redirect the root path to the MCP landing page."""
+    return RedirectResponse("/mcp", status_code=307)
+
+
+def _install_browser_landing(app) -> None:
+    """Serve the landing page for a browser GET on the MCP path.
+
+    FastMCP registers ``/mcp`` for every method before custom routes, so
+    the HTML response has to be chosen in front of that ASGI app. A GET
+    asking for ``text/event-stream`` is the protocol's SSE stream and
+    stays with the MCP handler.
+
+    Parameters
+    ----------
+    app : starlette.applications.Starlette
+        Streamable HTTP app from ``mcp.streamable_http_app``.
+    """
+    path = mcp.settings.streamable_http_path
+    for route in app.routes:
+        if isinstance(route, Route) and route.path == path:
+            inner = route.app
+
+            async def browser_or_mcp(scope, receive, send, inner=inner):
+                if scope["type"] == "http" and scope["method"] == "GET":
+                    accept = Headers(scope=scope).get("accept", "").lower()
+                    if "text/html" in accept and "text/event-stream" not in accept:
+                        await HTMLResponse(_LANDING_PAGE)(scope, receive, send)
+                        return
+                await inner(scope, receive, send)
+
+            route.app = browser_or_mcp
+            return
+    raise RuntimeError(f"No route for MCP path {path!r}")
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -856,7 +889,26 @@ def main(transport, host, port, db_label):
     mcp.settings.port = port
     # Comparisons default to DKG refinement, so load the ontology up front
     prefetch_dkg_closure()
-    mcp.run(transport=transport)
+    if transport == "streamable-http":
+        _run_streamable_http()
+    else:
+        mcp.run(transport=transport)
+
+
+def _run_streamable_http() -> None:
+    """Serve Streamable HTTP with the browser landing page on GET /mcp."""
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    _install_browser_landing(app)
+    config = uvicorn.Config(
+        app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+    server = uvicorn.Server(config)
+    anyio.run(server.serve)
 
 
 if __name__ == "__main__":
